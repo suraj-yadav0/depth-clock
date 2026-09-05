@@ -1,0 +1,32 @@
+.depth-clock-container {
+    background-color: transparent;
+}
+
+.depth-clock-widget {
+    background-color: transparent;
+    padding: 20px 40px;
+}
+
+.depth-clock-date {
+    color: rgba(230, 240, 250, 0.95);
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: 4px;
+    text-align: center;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+    padding-bottom: 8px;
+}
+
+.depth-clock-time {
+    color: #e2ecf9;
+    font-size: 260px;
+    font-weight: 700;
+    line-height: 0.9;
+    letter-spacing: 0px;
+    text-align: center;
+    text-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.depth-clock-time-stacked {
+    line-height: 0.82;
+}

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="depth-clock">
+  <schema id="org.gnome.shell.extensions.depth-clock" path="/org/gnome/shell/extensions/depth-clock/">
+    <key name="clock-x" type="d">
+      <default>0.5</default>
+      <summary>Horizontal position fraction</summary>
+    </key>
+    <key name="clock-y" type="d">
+      <default>0.28</default>
+      <summary>Vertical position fraction</summary>
+    </key>
+    <key name="clock-scale" type="d">
+      <default>1.0</default>
+      <summary>Clock scale</summary>
+    </key>
+    <key name="clock-font" type="s">
+      <default>'Antonio'</default>
+      <summary>Clock font family</summary>
+    </key>
+    <key name="clock-color" type="s">
+      <default>'#dce9f8'</default>
+      <summary>Clock text color</summary>
+    </key>
+    <key name="clock-opacity" type="d">
+      <default>1.0</default>
+      <summary>Clock opacity</summary>
+    </key>
+    <key name="time-format-24h" type="b">
+      <default>true</default>
+      <summary>Use 24h format</summary>
+    </key>
+    <key name="show-date" type="b">
+      <default>true</default>
+      <summary>Show date above clock</summary>
+    </key>
+    <key name="stack-digits" type="b">
+      <default>false</default>
+      <summary>Stack hours and minutes vertically</summary>
+    </key>
+    <key name="enable-depth" type="b">
+      <default>true</default>
+      <summary>Enable 3D depth effect</summary>
+    </key>
+    <key name="auto-adapt" type="b">
+      <default>true</default>
+      <summary>Disable depth if foreground completely obscures time</summary>
+    </key>
+  </schema>
+</schemalist>

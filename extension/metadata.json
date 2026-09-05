@@ -1,0 +1,14 @@
+{
+  "uuid": "depth-clock@suraj.local",
+  "name": "Depth Clock",
+  "description": "Automatic depth effect wallpaper clock with foreground occlusion.",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.depth-clock"
+}
