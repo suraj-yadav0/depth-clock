@@ -99,21 +99,37 @@ const ClockWidget = GObject.registerClass(
             // Scroll to resize
             this.connect('scroll-event', (_actor, event) => {
                 const dir = event.get_scroll_direction();
-                let scale = this._settings.get_double('clock-scale');
-                if (dir === Clutter.ScrollDirection.UP)
-                    scale = Math.min(3.0, scale + 0.05);
-                else if (dir === Clutter.ScrollDirection.DOWN)
-                    scale = Math.max(0.3, scale - 0.05);
-                else
+                let delta = 0;
+                if (dir === Clutter.ScrollDirection.UP) {
+                    delta = 1;
+                } else if (dir === Clutter.ScrollDirection.DOWN) {
+                    delta = -1;
+                } else if (dir === Clutter.ScrollDirection.SMOOTH) {
+                    const [, dy] = event.get_scroll_delta();
+                    if (Math.abs(dy) > 0.001)
+                        delta = -dy;
+                }
+
+                if (delta === 0)
                     return Clutter.EVENT_PROPAGATE;
 
-                this._applyStyles(scale);
+                let currentScale = this._currentScale ?? this._settings.get_double('clock-scale');
+                const step = (dir === Clutter.ScrollDirection.SMOOTH) ? delta * 0.15 : (delta > 0 ? 0.15 : -0.15);
+                let newScale = Math.max(0.4, Math.min(3.5, Math.round((currentScale + step) * 100) / 100));
+
+                if (newScale === currentScale)
+                    return Clutter.EVENT_STOP;
+
+                this._currentScale = newScale;
+                this._applyStyles(newScale);
+                this._applyPosition();
+
                 if (this._scrollTimerId !== null) {
                     GLib.source_remove(this._scrollTimerId);
                     this._scrollTimerId = null;
                 }
-                this._scrollTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
-                    this._settings.set_double('clock-scale', Math.round(scale * 100) / 100);
+                this._scrollTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
+                    this._settings.set_double('clock-scale', this._currentScale);
                     this._scrollTimerId = null;
                     return GLib.SOURCE_REMOVE;
                 });
