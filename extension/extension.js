@@ -31,6 +31,7 @@ const ClockWidget = GObject.registerClass(
             this._dragActorStartX = 0;
             this._dragActorStartY = 0;
             this._scrollTimerId = null;
+            this._currentScale = null;
 
             // Date label
             this._dateLabel = new St.Label({
@@ -49,6 +50,12 @@ const ClockWidget = GObject.registerClass(
             });
             this._timeLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
             this.add_child(this._timeLabel);
+
+            // Re-center whenever actor bounds or layout change
+            this.connect('notify::allocation', () => {
+                if (!this._isDragging && !this._isSavingPosition)
+                    this._applyPosition();
+            });
 
             // Drag positioning
             this.connect('button-press-event', (_actor, event) => {
@@ -96,7 +103,7 @@ const ClockWidget = GObject.registerClass(
                 return Clutter.EVENT_PROPAGATE;
             });
 
-            // Scroll to resize
+            // Responsive scroll-to-resize
             this.connect('scroll-event', (_actor, event) => {
                 const dir = event.get_scroll_direction();
                 let delta = 0;
@@ -114,21 +121,24 @@ const ClockWidget = GObject.registerClass(
                     return Clutter.EVENT_PROPAGATE;
 
                 let currentScale = this._currentScale ?? this._settings.get_double('clock-scale');
-                const step = (dir === Clutter.ScrollDirection.SMOOTH) ? delta * 0.15 : (delta > 0 ? 0.15 : -0.15);
-                let newScale = Math.max(0.4, Math.min(3.5, Math.round((currentScale + step) * 100) / 100));
+                const step = (dir === Clutter.ScrollDirection.SMOOTH)
+                    ? delta * 0.35
+                    : (delta > 0 ? 0.25 : -0.25);
+
+                let newScale = Math.max(0.3, Math.min(3.5, Math.round((currentScale + step) * 100) / 100));
 
                 if (newScale === currentScale)
                     return Clutter.EVENT_STOP;
 
                 this._currentScale = newScale;
                 this._applyStyles(newScale);
-                this._applyPosition();
 
+                // Debounce write to dconf
                 if (this._scrollTimerId !== null) {
                     GLib.source_remove(this._scrollTimerId);
                     this._scrollTimerId = null;
                 }
-                this._scrollTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
+                this._scrollTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
                     this._settings.set_double('clock-scale', this._currentScale);
                     this._scrollTimerId = null;
                     return GLib.SOURCE_REMOVE;
@@ -142,14 +152,14 @@ const ClockWidget = GObject.registerClass(
                     if (!this._isDragging)
                         this._applyPosition();
                 } else if (key === 'clock-scale' || key === 'clock-font' || key === 'clock-color' || key === 'clock-opacity' || key === 'stack-digits') {
+                    this._currentScale = this._settings.get_double('clock-scale');
                     this._applyStyles();
-                    this._applyPosition();
                 } else if (key === 'time-format-24h' || key === 'show-date') {
                     this._updateClock();
-                    this._applyPosition();
                 }
             });
 
+            this._currentScale = this._settings.get_double('clock-scale');
             this._applyStyles();
             this._applyPosition();
             this._updateClock();
@@ -178,12 +188,11 @@ const ClockWidget = GObject.registerClass(
                 `font-size: ${dateSize}px; color: ${color}; opacity: 0.9;`
             );
             this.set_opacity(opacity);
-            this._updateClock();
         }
 
         _applyPosition() {
             const bounds = this._getMonitorBounds();
-            if (!bounds) return;
+            if (!bounds || bounds.width === 0 || bounds.height === 0) return;
 
             const rx = this._settings.get_double('clock-x');
             const ry = this._settings.get_double('clock-y');
@@ -274,13 +283,15 @@ export default class DepthClockExtension extends Extension {
         this._cutoutSurface = null;
         this._activeSubprocess = null;
         this._lastProcessedHash = null;
+        this._requestToken = 0;
+        this._wallpaperTimerId = null;
 
         this._setupActors();
 
-        this._bgChangeId1 = this._bgSettings.connect('changed::picture-uri', () => this._onWallpaperChanged());
-        this._bgChangeId2 = this._bgSettings.connect('changed::picture-uri-dark', () => this._onWallpaperChanged());
-        this._bgChangeId3 = this._bgSettings.connect('changed::picture-options', () => this._onWallpaperChanged());
-        this._interfaceChangeId = this._interfaceSettings.connect('changed::color-scheme', () => this._onWallpaperChanged());
+        this._bgChangeId1 = this._bgSettings.connect('changed::picture-uri', () => this._scheduleWallpaperUpdate());
+        this._bgChangeId2 = this._bgSettings.connect('changed::picture-uri-dark', () => this._scheduleWallpaperUpdate());
+        this._bgChangeId3 = this._bgSettings.connect('changed::picture-options', () => this._scheduleWallpaperUpdate());
+        this._interfaceChangeId = this._interfaceSettings.connect('changed::color-scheme', () => this._scheduleWallpaperUpdate());
 
         this._settingsDepthId = this._settings.connect('changed::enable-depth', () => {
             if (this._cutoutArea)
@@ -289,11 +300,23 @@ export default class DepthClockExtension extends Extension {
 
         this._monitorsId = Main.layoutManager.connect('monitors-changed', () => {
             this._relayout();
-            this._onWallpaperChanged();
+            this._scheduleWallpaperUpdate();
         });
 
         // Trigger initial wallpaper processing
         this._onWallpaperChanged();
+    }
+
+    _scheduleWallpaperUpdate() {
+        if (this._wallpaperTimerId) {
+            GLib.source_remove(this._wallpaperTimerId);
+            this._wallpaperTimerId = null;
+        }
+        this._wallpaperTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
+            this._wallpaperTimerId = null;
+            this._onWallpaperChanged();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _getPrimaryMonitor() {
@@ -409,11 +432,12 @@ export default class DepthClockExtension extends Extension {
         const monitor = this._getPrimaryMonitor();
         if (!monitor) return;
 
-        // Calculate crop ratios if spanned
+        // Calculate crop ratios if spanned or multi-monitor hydrapaper
         const pictureOptions = this._bgSettings.get_string('picture-options');
+        const isSpanned = pictureOptions === 'spanned' || wallpaperPath.includes('hydrapaper');
         let cropRatio = null;
 
-        if (pictureOptions === 'spanned') {
+        if (isSpanned && Main.layoutManager.monitors.length > 1) {
             let minX = 0, minY = 0, maxX = 0, maxY = 0;
             for (const m of Main.layoutManager.monitors) {
                 minX = Math.min(minX, m.x);
@@ -484,6 +508,14 @@ export default class DepthClockExtension extends Extension {
             return;
         }
 
+        if (this._activeSubprocess) {
+            try {
+                this._activeSubprocess.force_exit();
+            } catch (e) {}
+            this._activeSubprocess = null;
+        }
+
+        const token = ++this._requestToken;
         const argv = [pythonBin, scriptPath, wallpaperPath, outputPng];
         if (cropRatio) {
             argv.push('--crop-ratio');
@@ -500,6 +532,9 @@ export default class DepthClockExtension extends Extension {
             proc.wait_async(null, (source, res) => {
                 try {
                     source.wait_finish(res);
+                    if (token !== this._requestToken)
+                        return;
+
                     if (source.get_successful()) {
                         this._loadCutout(outputPng);
                     } else {
@@ -515,6 +550,10 @@ export default class DepthClockExtension extends Extension {
     }
 
     disable() {
+        if (this._wallpaperTimerId) {
+            GLib.source_remove(this._wallpaperTimerId);
+            this._wallpaperTimerId = null;
+        }
         if (this._bgChangeId1) this._bgSettings.disconnect(this._bgChangeId1);
         if (this._bgChangeId2) this._bgSettings.disconnect(this._bgChangeId2);
         if (this._bgChangeId3) this._bgSettings.disconnect(this._bgChangeId3);
@@ -552,5 +591,6 @@ export default class DepthClockExtension extends Extension {
         this._bgGroup = null;
         this._settings = null;
         this._bgSettings = null;
+        this._interfaceSettings = null;
     }
 }
