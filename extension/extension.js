@@ -181,8 +181,18 @@ const ClockWidget = GObject.registerClass(
             const fontSize = Math.round(baseFontSize * scale);
             const dateSize = Math.round(24 * scale);
 
+            const fontDesc = Pango.FontDescription.from_string(font);
+            const fontFamily = fontDesc.get_family() || font;
+            const fontWeight = fontDesc.get_weight();
+            const weightCss = fontWeight && fontWeight !== Pango.Weight.NORMAL
+                ? `font-weight: ${fontWeight};`
+                : 'font-weight: 700;';
+            const styleCss = fontDesc.get_style() !== Pango.Style.NORMAL
+                ? 'font-style: italic;'
+                : '';
+
             this._timeLabel.set_style(
-                `font-family: '${font}', sans-serif; font-size: ${fontSize}px; color: ${color}; line-height: ${isStacked ? 0.82 : 0.9};`
+                `font-family: '${fontFamily}', sans-serif; ${weightCss} ${styleCss} font-size: ${fontSize}px; color: ${color}; line-height: ${isStacked ? 0.82 : 0.9};`
             );
             this._dateLabel.set_style(
                 `font-size: ${dateSize}px; color: ${color}; opacity: 0.9;`
