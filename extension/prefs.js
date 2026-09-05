@@ -108,6 +108,49 @@ export default class DepthClockPreferences extends ExtensionPreferences {
         settings.bind('stack-digits', stackRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         appearGroup.add(stackRow);
 
+        // Group: Position
+        const posGroup = new Adw.PreferencesGroup({
+            title: _('Position'),
+            description: _('Fine-tune clock placement on the desktop (or click & drag directly on desktop)'),
+        });
+        page.add(posGroup);
+
+        // Horizontal Position
+        const posXRow = new Adw.SpinRow({
+            title: _('Horizontal Position (%)'),
+            subtitle: _('0% = Left edge, 50% = Centered, 100% = Right edge'),
+            adjustment: new Gtk.Adjustment({
+                lower: 0.0,
+                upper: 100.0,
+                step_increment: 1.0,
+                page_increment: 5.0,
+                value: Math.round(settings.get_double('clock-x') * 100),
+            }),
+            digits: 0,
+        });
+        posXRow.connect('notify::value', (spin) => {
+            settings.set_double('clock-x', spin.get_value() / 100.0);
+        });
+        posGroup.add(posXRow);
+
+        // Vertical Position
+        const posYRow = new Adw.SpinRow({
+            title: _('Vertical Position (%)'),
+            subtitle: _('0% = Top edge, 28% = Default, 100% = Bottom edge'),
+            adjustment: new Gtk.Adjustment({
+                lower: 0.0,
+                upper: 100.0,
+                step_increment: 1.0,
+                page_increment: 5.0,
+                value: Math.round(settings.get_double('clock-y') * 100),
+            }),
+            digits: 0,
+        });
+        posYRow.connect('notify::value', (spin) => {
+            settings.set_double('clock-y', spin.get_value() / 100.0);
+        });
+        posGroup.add(posYRow);
+
         // Group: Time & Date
         const timeGroup = new Adw.PreferencesGroup({
             title: _('Time & Date'),

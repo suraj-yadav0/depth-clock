@@ -24,6 +24,8 @@ const ClockWidget = GObject.registerClass(
             this._settings = settings;
             this._getMonitorBounds = getMonitorBounds;
             this._isDragging = false;
+            this._isSavingPosition = false;
+            this._grab = null;
             this._dragStartX = 0;
             this._dragStartY = 0;
             this._dragActorStartX = 0;
@@ -52,6 +54,11 @@ const ClockWidget = GObject.registerClass(
             this.connect('button-press-event', (_actor, event) => {
                 if (event.get_button() === 1) {
                     this._isDragging = true;
+                    try {
+                        this._grab = global.stage.grab(this);
+                    } catch (e) {
+                        this._grab = null;
+                    }
                     const [stageX, stageY] = event.get_coords();
                     this._dragStartX = stageX;
                     this._dragStartY = stageY;
@@ -78,6 +85,10 @@ const ClockWidget = GObject.registerClass(
 
             this.connect('button-release-event', (_actor, event) => {
                 if (event.get_button() === 1 && this._isDragging) {
+                    if (this._grab) {
+                        this._grab.dismiss();
+                        this._grab = null;
+                    }
                     this._isDragging = false;
                     this._savePosition();
                     return Clutter.EVENT_STOP;
@@ -110,12 +121,17 @@ const ClockWidget = GObject.registerClass(
             });
 
             this._settingsId = this._settings.connect('changed', (_s, key) => {
-                if (key === 'clock-x' || key === 'clock-y')
-                    this._applyPosition();
-                else if (key === 'clock-scale' || key === 'clock-font' || key === 'clock-color' || key === 'clock-opacity' || key === 'stack-digits')
+                if (this._isSavingPosition) return;
+                if (key === 'clock-x' || key === 'clock-y') {
+                    if (!this._isDragging)
+                        this._applyPosition();
+                } else if (key === 'clock-scale' || key === 'clock-font' || key === 'clock-color' || key === 'clock-opacity' || key === 'stack-digits') {
                     this._applyStyles();
-                else if (key === 'time-format-24h' || key === 'show-date')
+                    this._applyPosition();
+                } else if (key === 'time-format-24h' || key === 'show-date') {
                     this._updateClock();
+                    this._applyPosition();
+                }
             });
 
             this._applyStyles();
@@ -169,11 +185,13 @@ const ClockWidget = GObject.registerClass(
             const centerX = this.x + this.width / 2;
             const centerY = this.y + this.height / 2;
 
-            const rx = Math.max(0.05, Math.min(0.95, centerX / bounds.width));
-            const ry = Math.max(0.05, Math.min(0.95, centerY / bounds.height));
+            const rx = Math.max(-0.2, Math.min(1.2, centerX / bounds.width));
+            const ry = Math.max(-0.2, Math.min(1.2, centerY / bounds.height));
 
+            this._isSavingPosition = true;
             this._settings.set_double('clock-x', Math.round(rx * 1000) / 1000);
             this._settings.set_double('clock-y', Math.round(ry * 1000) / 1000);
+            this._isSavingPosition = false;
         }
 
         _updateClock() {
@@ -207,6 +225,10 @@ const ClockWidget = GObject.registerClass(
         }
 
         destroy() {
+            if (this._grab) {
+                this._grab.dismiss();
+                this._grab = null;
+            }
             if (this._tickerId) {
                 GLib.source_remove(this._tickerId);
                 this._tickerId = null;
@@ -266,7 +288,6 @@ export default class DepthClockExtension extends Extension {
 
         this._container = new Clutter.Actor({
             reactive: false,
-            style_class: 'depth-clock-container',
         });
         this._container.set_position(monitor.x, monitor.y);
         this._container.set_size(monitor.width, monitor.height);
