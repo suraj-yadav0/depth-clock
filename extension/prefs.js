@@ -1,6 +1,8 @@
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk';
+import Gdk from 'gi://Gdk';
+import Pango from 'gi://Pango';
 import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 export default class DepthClockPreferences extends ExtensionPreferences {
@@ -41,28 +43,86 @@ export default class DepthClockPreferences extends ExtensionPreferences {
         });
         page.add(appearGroup);
 
-        // Font
-        const fontRow = new Adw.EntryRow({
+        // Font Selector
+        const currentFont = settings.get_string('clock-font') || 'Antonio';
+        const fontDesc = Pango.FontDescription.from_string(currentFont);
+        fontDesc.unset_fields(Pango.FontMask.SIZE);
+
+        const fontRow = new Adw.ActionRow({
             title: _('Font Family'),
-            text: settings.get_string('clock-font'),
+            subtitle: currentFont,
         });
-        fontRow.connect('changed', (entry) => {
-            const val = entry.get_text().trim();
-            if (val.length > 0)
-                settings.set_string('clock-font', val);
+
+        const fontDialog = new Gtk.FontDialog({ modal: true });
+        const fontButton = new Gtk.FontDialogButton({
+            dialog: fontDialog,
+            font_desc: fontDesc,
+            use_font: true,
+            use_size: false,
+            valign: Gtk.Align.CENTER,
         });
+
+        fontButton.connect('notify::font-desc', () => {
+            const desc = fontButton.get_font_desc();
+            if (!desc) return;
+            desc.unset_fields(Pango.FontMask.SIZE);
+            const fontName = desc.to_string();
+            fontRow.subtitle = fontName;
+            settings.set_string('clock-font', fontName);
+        });
+
+        settings.connect('changed::clock-font', () => {
+            const val = settings.get_string('clock-font');
+            fontRow.subtitle = val;
+            const updatedDesc = Pango.FontDescription.from_string(val);
+            updatedDesc.unset_fields(Pango.FontMask.SIZE);
+            fontButton.set_font_desc(updatedDesc);
+        });
+
+        fontRow.add_suffix(fontButton);
+        fontRow.activatable_widget = fontButton;
         appearGroup.add(fontRow);
 
-        // Text Color
-        const colorRow = new Adw.EntryRow({
-            title: _('Text Color (Hex)'),
-            text: settings.get_string('clock-color'),
+        // Text Color Selector
+        const currentColor = settings.get_string('clock-color') || '#dce9f8';
+        const rgba = new Gdk.RGBA();
+        if (!rgba.parse(currentColor))
+            rgba.parse('#dce9f8');
+
+        const colorRow = new Adw.ActionRow({
+            title: _('Text Color'),
+            subtitle: currentColor,
         });
-        colorRow.connect('changed', (entry) => {
-            const val = entry.get_text().trim();
-            if (/^#[0-9a-fA-F]{6}$/.test(val))
-                settings.set_string('clock-color', val);
+
+        const colorDialog = new Gtk.ColorDialog({
+            modal: true,
+            with_alpha: false,
         });
+        const colorButton = new Gtk.ColorDialogButton({
+            dialog: colorDialog,
+            rgba: rgba,
+            valign: Gtk.Align.CENTER,
+        });
+
+        const toHex = (n) => Math.round(Math.max(0, Math.min(1, n)) * 255).toString(16).padStart(2, '0');
+
+        colorButton.connect('notify::rgba', () => {
+            const c = colorButton.get_rgba();
+            const hex = `#${toHex(c.red)}${toHex(c.green)}${toHex(c.blue)}`;
+            colorRow.subtitle = hex;
+            settings.set_string('clock-color', hex);
+        });
+
+        settings.connect('changed::clock-color', () => {
+            const val = settings.get_string('clock-color');
+            colorRow.subtitle = val;
+            const updatedRgba = new Gdk.RGBA();
+            if (updatedRgba.parse(val))
+                colorButton.set_rgba(updatedRgba);
+        });
+
+        colorRow.add_suffix(colorButton);
+        colorRow.activatable_widget = colorButton;
         appearGroup.add(colorRow);
 
         // Scale
