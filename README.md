@@ -26,10 +26,30 @@ Depth Clock is a GNOME Shell extension that brings an iOS-style 3D depth effect 
    - Middle: Depth Clock widget
    - Top: Cairo drawing surface rendering the foreground cutout mask
 
+## Compatibility
+
+Depth Clock requires GNOME Shell 45 or newer (which uses ES Modules). It is not compatible with GNOME 44 or older, nor does it support other desktop environments (KDE, XFCE, Cinnamon, or tiling window managers).
+
+### Supported Distributions
+
+- Ubuntu 24.04 LTS or newer
+- Fedora 39 or newer
+- Debian 13 (Trixie) or newer
+- Arch Linux / Manjaro (running GNOME 45+)
+- openSUSE Tumbleweed
+
+### Incompatible Distributions
+
+- Ubuntu 22.04 LTS and older (ships with GNOME 42 or earlier)
+- Debian 12 (Bookworm) and older (ships with GNOME 43 or earlier)
+- RHEL 9 / Rocky Linux 9 / AlmaLinux 9 (ships with GNOME 40)
+- Fedora 38 and older
+
 ## Requirements
 
 - GNOME Shell 45 or newer
 - Python 3.10+ with `venv` support
+- x86_64 CPU with AVX support (required by ONNX Runtime)
 - `curl`
 - `glib-compile-schemas` (part of `libglib2.0-bin` on Debian/Ubuntu, `glib2` on Fedora/Arch)
 
