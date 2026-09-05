@@ -45,5 +45,9 @@
       <default>true</default>
       <summary>Disable depth if foreground completely obscures time</summary>
     </key>
+    <key name="auto-color" type="b">
+      <default>true</default>
+      <summary>Automatically adapt clock color to match wallpaper palette</summary>
+    </key>
   </schema>
 </schemalist>

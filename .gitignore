@@ -38,6 +38,7 @@ ENV/
 *.jpg
 *.jpeg
 *.log
+gschemas.compiled
 !assets/**
 
 # IDE & OS files

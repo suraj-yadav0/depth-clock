@@ -5,6 +5,7 @@ import time
 import json
 import urllib.parse
 from pathlib import Path
+import colorsys
 import numpy as np
 from PIL import Image
 import onnxruntime as ort
@@ -16,6 +17,42 @@ def parse_image_path(raw_path):
         parsed = urllib.parse.urlparse(raw_path)
         return urllib.parse.unquote(parsed.path)
     return raw_path
+
+def compute_adaptive_clock_color(image):
+    thumb = image.resize((96, 96), Image.Resampling.BILINEAR)
+    arr = np.array(thumb, dtype=np.float32) / 255.0
+    h, w, _ = arr.shape
+
+    clock_zone = arr[int(h * 0.12):int(h * 0.50), :]
+    lum_map = 0.2126 * clock_zone[:, :, 0] + 0.7152 * clock_zone[:, :, 1] + 0.0722 * clock_zone[:, :, 2]
+    bg_lum = float(np.mean(lum_map))
+
+    best_score = -1.0
+    best_h = 0.6
+    best_s = 0.3
+
+    for r, g, b in arr.reshape(-1, 3)[::2]:
+        h_val, l_val, s_val = colorsys.rgb_to_hls(r, g, b)
+        if 0.15 < l_val < 0.85 and s_val > 0.12:
+            score = s_val * (1.0 - abs(l_val - 0.5) * 0.8)
+            if score > best_score:
+                best_score = score
+                best_h = h_val
+                best_s = s_val
+
+    is_monochrome = (best_score < 0)
+    if bg_lum < 0.52:
+        target_l = 0.91
+        target_s = 0.05 if is_monochrome else min(0.42, max(0.22, best_s * 0.75))
+    else:
+        target_l = 0.18
+        target_s = 0.08 if is_monochrome else min(0.55, max(0.28, best_s * 0.85))
+
+    fr, fg, fb = colorsys.hls_to_rgb(best_h, target_l, target_s)
+    r_hex = int(round(max(0.0, min(1.0, fr)) * 255))
+    g_hex = int(round(max(0.0, min(1.0, fg)) * 255))
+    b_hex = int(round(max(0.0, min(1.0, fb)) * 255))
+    return f"#{r_hex:02x}{g_hex:02x}{b_hex:02x}"
 
 def process_wallpaper(input_path, output_png, crop_box=None, crop_ratio=None):
     clean_path = parse_image_path(input_path)
@@ -90,6 +127,7 @@ def process_wallpaper(input_path, output_png, crop_box=None, crop_ratio=None):
         "foreground_ratio": round(total_foreground, 3),
         "clock_zone_occlusion": round(clock_occlusion, 3),
         "depth_viable": clock_occlusion < 0.85 and total_foreground > 0.05,
+        "suggested_color": compute_adaptive_clock_color(orig_img),
         "render_time": round(time.time() - start_time, 2)
     }
     

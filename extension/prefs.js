@@ -83,6 +83,14 @@ export default class DepthClockPreferences extends ExtensionPreferences {
         fontRow.activatable_widget = fontButton;
         appearGroup.add(fontRow);
 
+        // Adaptive Wallpaper Color
+        const autoColorRow = new Adw.SwitchRow({
+            title: _('Adaptive Wallpaper Color'),
+            subtitle: _('Automatically adjust clock color to harmonize with current wallpaper'),
+        });
+        settings.bind('auto-color', autoColorRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        appearGroup.add(autoColorRow);
+
         // Text Color Selector
         const currentColor = settings.get_string('clock-color') || '#dce9f8';
         const rgba = new Gdk.RGBA();
@@ -106,24 +114,37 @@ export default class DepthClockPreferences extends ExtensionPreferences {
 
         const toHex = (n) => Math.round(Math.max(0, Math.min(1, n)) * 255).toString(16).padStart(2, '0');
 
+        const syncColorState = () => {
+            const isAuto = settings.get_boolean('auto-color');
+            colorButton.sensitive = !isAuto;
+            const val = settings.get_string('clock-color');
+            colorRow.subtitle = isAuto ? `${val} (Auto)` : val;
+        };
+
         colorButton.connect('notify::rgba', () => {
             const c = colorButton.get_rgba();
             const hex = `#${toHex(c.red)}${toHex(c.green)}${toHex(c.blue)}`;
-            colorRow.subtitle = hex;
             settings.set_string('clock-color', hex);
+            syncColorState();
         });
 
         settings.connect('changed::clock-color', () => {
             const val = settings.get_string('clock-color');
-            colorRow.subtitle = val;
             const updatedRgba = new Gdk.RGBA();
             if (updatedRgba.parse(val))
                 colorButton.set_rgba(updatedRgba);
+            syncColorState();
+        });
+
+        settings.connect('changed::auto-color', () => {
+            syncColorState();
         });
 
         colorRow.add_suffix(colorButton);
         colorRow.activatable_widget = colorButton;
         appearGroup.add(colorRow);
+
+        syncColorState();
 
         // Scale
         const scaleRow = new Adw.SpinRow({

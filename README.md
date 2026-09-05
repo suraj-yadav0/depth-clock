@@ -24,7 +24,8 @@ A curated collection of wallpapers tested and optimized for Depth Clock is avail
 - Automatic Foreground Occlusion: Segments people, pets, architecture, and objects using on-device neural networks.
 - Direct Desktop Controls: Click and drag the clock anywhere on your desktop to reposition. Scroll over the clock to resize dynamically.
 - Customization:
-  - Font family, text color, and opacity.
+  - Adaptive Wallpaper Color: Automatically analyzes wallpaper palette and luminance to adjust clock color for high contrast and aesthetic harmony.
+  - Native Font & Color Selectors: Choose installed system fonts and custom colors using GTK4 modal dialogs.
   - 12-hour or 24-hour time format.
   - Optional date indicator.
   - Stacked digits layout (hours on top, minutes below) or classic horizontal layout.
