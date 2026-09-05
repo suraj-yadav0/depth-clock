@@ -250,6 +250,7 @@ export default class DepthClockExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
         this._bgSettings = new Gio.Settings({ schema: 'org.gnome.desktop.background' });
+        this._interfaceSettings = new Gio.Settings({ schema: 'org.gnome.desktop.interface' });
 
         this._container = null;
         this._clockWidget = null;
@@ -263,6 +264,7 @@ export default class DepthClockExtension extends Extension {
         this._bgChangeId1 = this._bgSettings.connect('changed::picture-uri', () => this._onWallpaperChanged());
         this._bgChangeId2 = this._bgSettings.connect('changed::picture-uri-dark', () => this._onWallpaperChanged());
         this._bgChangeId3 = this._bgSettings.connect('changed::picture-options', () => this._onWallpaperChanged());
+        this._interfaceChangeId = this._interfaceSettings.connect('changed::color-scheme', () => this._onWallpaperChanged());
 
         this._settingsDepthId = this._settings.connect('changed::enable-depth', () => {
             if (this._cutoutArea)
@@ -361,9 +363,19 @@ export default class DepthClockExtension extends Extension {
     }
 
     _getWallpaperPath() {
-        let uri = this._bgSettings.get_string('picture-uri-dark');
-        if (!uri || uri === '')
+        const colorScheme = this._interfaceSettings ? this._interfaceSettings.get_string('color-scheme') : 'default';
+        const isDark = colorScheme === 'prefer-dark';
+
+        let uri = null;
+        if (isDark) {
+            uri = this._bgSettings.get_string('picture-uri-dark');
+            if (!uri || uri === '')
+                uri = this._bgSettings.get_string('picture-uri');
+        } else {
             uri = this._bgSettings.get_string('picture-uri');
+            if (!uri || uri === '')
+                uri = this._bgSettings.get_string('picture-uri-dark');
+        }
         if (!uri) return null;
 
         if (uri.startsWith('file://')) {
@@ -428,6 +440,9 @@ export default class DepthClockExtension extends Extension {
         if (GLib.file_test(cacheFile, GLib.FileTest.EXISTS)) {
             this._loadCutout(cacheFile);
         } else {
+            this._cutoutSurface = null;
+            if (this._cutoutArea)
+                this._cutoutArea.queue_repaint();
             this._generateCutoutAsync(wallpaperPath, cacheFile, cropRatio);
         }
     }
@@ -487,6 +502,7 @@ export default class DepthClockExtension extends Extension {
         if (this._bgChangeId1) this._bgSettings.disconnect(this._bgChangeId1);
         if (this._bgChangeId2) this._bgSettings.disconnect(this._bgChangeId2);
         if (this._bgChangeId3) this._bgSettings.disconnect(this._bgChangeId3);
+        if (this._interfaceChangeId) this._interfaceSettings.disconnect(this._interfaceChangeId);
         if (this._settingsDepthId) this._settings.disconnect(this._settingsDepthId);
         if (this._monitorsId) Main.layoutManager.disconnect(this._monitorsId);
 
