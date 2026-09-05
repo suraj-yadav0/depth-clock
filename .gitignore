@@ -35,10 +35,10 @@ ENV/
 # Cache and local artifacts
 .cache/
 *.png
-!fonts/
 *.jpg
 *.jpeg
 *.log
+!assets/**
 
 # IDE & OS files
 .vscode/

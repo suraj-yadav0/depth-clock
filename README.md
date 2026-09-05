@@ -2,6 +2,23 @@
 
 Depth Clock is a GNOME Shell extension that brings an iOS-style 3D depth effect clock to your Linux desktop wallpaper. By running an on-device AI segmentation model, the extension separates foreground subjects from your desktop wallpaper and renders a customizable clock tucked naturally behind foreground elements.
 
+## Previews
+
+| | |
+| :---: | :---: |
+| ![Depth Clock Preview 1](assets/screenshots/screenshot-1.png) | ![Depth Clock Preview 2](assets/screenshots/screenshot-2.png) |
+| ![Depth Clock Preview 3](assets/screenshots/screenshot-3.png) | ![Depth Clock Preview 4](assets/screenshots/screenshot-4.png) |
+
+## Suitable Wallpapers
+
+For the best 3D depth effect, use wallpapers with:
+- Well-defined foreground subjects (people, anime or gaming characters, pets, statues, architecture).
+- Good contrast between foreground subjects and the background sky or scenery.
+- Sufficient space for the clock digits to sit behind foreground elements without obstructing legibility.
+
+A curated collection of wallpapers tested and optimized for Depth Clock is available at:
+- [depth-clock-wallpapers](https://github.com/suraj-yadav0/depth-clock-wallpapers)
+
 ## Features
 
 - Automatic Foreground Occlusion: Segments people, pets, architecture, and objects using on-device neural networks.
@@ -122,6 +139,8 @@ gnome-extensions prefs depth-clock@suraj.local
 
 ```
 depth-clock/
+├── assets/
+│   └── screenshots/          # Desktop preview screenshots
 ├── backend/
 │   ├── requirements.txt      # Python dependencies (numpy, pillow, onnxruntime)
 │   ├── segment.py            # Wallpaper segmentation worker
