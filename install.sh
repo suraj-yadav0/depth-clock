@@ -3,7 +3,9 @@ set -e
 
 EXTENSION_ID="depth-clock@suraj.local"
 REPO_URL="https://github.com/suraj-yadav0/depth-clock.git"
+ARCHIVE_URL="https://github.com/suraj-yadav0/depth-clock/archive/refs/heads/main.tar.gz"
 MODEL_URL="https://huggingface.co/briaai/RMBG-1.4/resolve/main/onnx/model.onnx"
+MODEL_MIRROR_URL="https://hf-mirror.com/briaai/RMBG-1.4/resolve/main/onnx/model.onnx"
 EXPECTED_MODEL_SHA256="8cafcf770b06757c4eaced21b1a88e57fd2b66de01b8045f35f01535ba742e0f"
 
 DATA_DIR="$HOME/.local/share/depth-clock"
@@ -20,44 +22,104 @@ trap cleanup EXIT
 
 echo "=== Installing Depth Clock GNOME Extension ==="
 
-# Determine source directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+# Determine source directory safely across shells
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE-}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "$BASH_SOURCE")" 2>/dev/null && pwd || true)"
+elif [ -n "$0" ] && [ -f "$0" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)"
+fi
 
-if [ -d "$SCRIPT_DIR/extension" ] && [ -d "$SCRIPT_DIR/backend" ]; then
+if [ -n "$SCRIPT_DIR" ] && [ -d "$SCRIPT_DIR/extension" ] && [ -d "$SCRIPT_DIR/backend" ]; then
     SOURCE_DIR="$SCRIPT_DIR"
 else
     echo "--> Remote execution detected. Fetching repository files..."
     TEMP_DIR=$(mktemp -d)
+    SOURCE_DIR=""
+
     if command -v git >/dev/null 2>&1; then
-        git clone --depth 1 "$REPO_URL" "$TEMP_DIR/depth-clock" >/dev/null 2>&1 || {
-            echo "[ERROR] Failed to clone repository."
-            exit 1
-        }
-        SOURCE_DIR="$TEMP_DIR/depth-clock"
-    else
-        curl -sSL "https://github.com/suraj-yadav0/depth-clock/archive/refs/heads/main.tar.gz" | tar -xz -C "$TEMP_DIR" || {
-            echo "[ERROR] Failed to download repository archive."
-            exit 1
-        }
-        SOURCE_DIR="$TEMP_DIR/depth-clock-main"
+        echo "    Cloning repository via git..."
+        if git clone --depth 1 "$REPO_URL" "$TEMP_DIR/depth-clock" 2>/dev/null; then
+            SOURCE_DIR="$TEMP_DIR/depth-clock"
+        else
+            echo "    [WARN] Git clone failed. Falling back to archive download..."
+        fi
+    fi
+
+    if [ -z "$SOURCE_DIR" ]; then
+        echo "    Downloading repository archive..."
+        mkdir -p "$TEMP_DIR/depth-clock-archive"
+        if curl -sSL --retry 3 --retry-delay 2 "$ARCHIVE_URL" | tar -xz -C "$TEMP_DIR/depth-clock-archive"; then
+            SOURCE_DIR="$TEMP_DIR/depth-clock-archive/depth-clock-main"
+        fi
+    fi
+
+    if [ -z "$SOURCE_DIR" ] || [ ! -d "$SOURCE_DIR/extension" ]; then
+        echo "[ERROR] Failed to fetch repository files via git and archive download."
+        exit 1
     fi
 fi
 
 # Check system dependencies
 echo "--> Checking system dependencies..."
-for cmd in python3 curl; do
+missing_bins=""
+for cmd in python3 curl tar; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
-        echo "[ERROR] Required dependency '$cmd' is not installed."
-        exit 1
+        missing_bins="$missing_bins $cmd"
     fi
 done
 
-if ! python3 -m venv --help >/dev/null 2>&1; then
-    echo "[ERROR] python3-venv is required. Install it using your distribution package manager."
-    echo "    Ubuntu/Debian: sudo apt install python3-venv"
-    echo "    Fedora: sudo dnf install python3"
-    echo "    Arch Linux: sudo pacman -S python"
+if [ -n "$missing_bins" ]; then
+    echo "[ERROR] Required base commands missing:$missing_bins"
     exit 1
+fi
+
+missing_packages=""
+if ! python3 -m venv --help >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+        missing_packages="$missing_packages python3-venv"
+    elif command -v dnf >/dev/null 2>&1; then
+        missing_packages="$missing_packages python3"
+    elif command -v pacman >/dev/null 2>&1; then
+        missing_packages="$missing_packages python"
+    fi
+fi
+
+if ! command -v glib-compile-schemas >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+        missing_packages="$missing_packages libglib2.0-bin"
+    elif command -v dnf >/dev/null 2>&1; then
+        missing_packages="$missing_packages glib2"
+    elif command -v pacman >/dev/null 2>&1; then
+        missing_packages="$missing_packages glib2"
+    fi
+fi
+
+if [ -n "$missing_packages" ]; then
+    installed=false
+    if [ -e /dev/tty ] && [ -r /dev/tty ] && command -v sudo >/dev/null 2>&1; then
+        echo "--> Missing required system packages:$missing_packages"
+        printf "    Install missing packages with sudo? [Y/n] " >/dev/tty
+        read -r reply </dev/tty || reply="n"
+        if [ -z "$reply" ] || [ "$reply" = "y" ] || [ "$reply" = "Y" ]; then
+            if command -v apt-get >/dev/null 2>&1; then
+                sudo apt-get update -qq && sudo apt-get install -y $missing_packages </dev/tty && installed=true
+            elif command -v dnf >/dev/null 2>&1; then
+                sudo dnf install -y $missing_packages </dev/tty && installed=true
+            elif command -v pacman >/dev/null 2>&1; then
+                sudo pacman -S --noconfirm $missing_packages </dev/tty && installed=true
+            fi
+        fi
+    fi
+
+    if [ "$installed" = false ]; then
+        echo "[ERROR] Missing required dependencies:$missing_packages"
+        echo "Please install them manually using your package manager:"
+        echo "    Ubuntu/Debian: sudo apt install python3-venv libglib2.0-bin"
+        echo "    Fedora:        sudo dnf install python3 glib2"
+        echo "    Arch Linux:    sudo pacman -S python glib2"
+        exit 1
+    fi
 fi
 
 # Set up Python virtual environment
@@ -88,11 +150,32 @@ fi
 if [ "$download_model" = true ]; then
     echo "--> Downloading RMBG-1.4 segmentation model (~176 MB)..."
     TMP_MODEL="$MODEL_PATH.tmp"
-    curl -L --fail --progress-bar -o "$TMP_MODEL" "$MODEL_URL" || {
-        echo "[ERROR] Failed to download model from $MODEL_URL"
+    download_success=false
+
+    echo "    Attempting download from Hugging Face..."
+    if curl -L --fail --retry 3 --retry-delay 2 --connect-timeout 15 -C - --progress-bar -o "$TMP_MODEL" "$MODEL_URL"; then
+        download_success=true
+    else
+        echo "    [WARN] Primary download interrupted or failed. Trying mirror..."
+        if curl -L --fail --retry 3 --retry-delay 2 --connect-timeout 15 -C - --progress-bar -o "$TMP_MODEL" "$MODEL_MIRROR_URL"; then
+            download_success=true
+        fi
+    fi
+
+    if [ "$download_success" = false ]; then
+        echo "[ERROR] Failed to download model from primary source and mirror."
+        echo "    You can manually place model.onnx at: $MODEL_PATH"
         rm -f "$TMP_MODEL"
         exit 1
-    }
+    fi
+
+    TMP_SIZE=$(stat -c%s "$TMP_MODEL" 2>/dev/null || stat -f%z "$TMP_MODEL" 2>/dev/null || echo 0)
+    if [ "$TMP_SIZE" -lt 150000000 ]; then
+        echo "[ERROR] Downloaded model is incomplete or corrupted."
+        rm -f "$TMP_MODEL"
+        exit 1
+    fi
+
     mv "$TMP_MODEL" "$MODEL_PATH"
     echo "    [OK] Model downloaded successfully."
 else
@@ -126,12 +209,8 @@ cp "$SOURCE_DIR/extension/stylesheet.css" "$EXTENSION_DIR/"
 cp "$SOURCE_DIR/extension/schemas/"*.gschema.xml "$EXTENSION_DIR/schemas/"
 
 # Compile schemas
-if command -v glib-compile-schemas >/dev/null 2>&1; then
-    glib-compile-schemas "$EXTENSION_DIR/schemas"
-    echo "    [OK] GSettings schemas compiled."
-else
-    echo "[WARN] glib-compile-schemas not found. Please install libglib2.0-bin / glib2."
-fi
+glib-compile-schemas "$EXTENSION_DIR/schemas"
+echo "    [OK] GSettings schemas compiled."
 
 # Attempt to enable the extension
 if command -v gnome-extensions >/dev/null 2>&1; then
