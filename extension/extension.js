@@ -52,21 +52,30 @@ const ClockWidget = GObject.registerClass(
             this._timeLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
             this.add_child(this._timeLabel);
 
-            // Re-center whenever actor bounds or layout change
+            // Re-center whenever actor bounds or layout change without feedback loops
             this.connect('notify::allocation', () => {
-                if (!this._isDragging && !this._isSavingPosition)
-                    this._applyPosition();
+                if (!this._isDragging && !this._isSavingPosition) {
+                    const bounds = this._getMonitorBounds();
+                    if (!bounds || bounds.width === 0 || bounds.height === 0) return;
+                    const rx = this._settings.get_double('clock-x');
+                    const ry = this._settings.get_double('clock-y');
+                    const targetX = Math.round(bounds.width * rx - this.width / 2);
+                    const targetY = Math.round(bounds.height * ry - this.height / 2);
+                    if (this.x !== targetX || this.y !== targetY) {
+                        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                            if (!this._isDragging && !this._isSavingPosition)
+                                this.set_position(targetX, targetY);
+                            return GLib.SOURCE_REMOVE;
+                        });
+                    }
+                }
             });
 
             // Drag positioning
             this.connect('button-press-event', (_actor, event) => {
                 if (event.get_button() === 1) {
                     this._isDragging = true;
-                    try {
-                        this._grab = global.stage.grab(this);
-                    } catch (e) {
-                        this._grab = null;
-                    }
+                    this._grab = global.stage.grab(this);
                     const [stageX, stageY] = event.get_coords();
                     this._dragStartX = stageX;
                     this._dragStartY = stageY;
@@ -296,6 +305,7 @@ export default class DepthClockExtension extends Extension {
         this._lastProcessedHash = null;
         this._requestToken = 0;
         this._wallpaperTimerId = null;
+        this._layoutIdleId = null;
 
         this._setupActors();
 
@@ -382,7 +392,14 @@ export default class DepthClockExtension extends Extension {
                 const sw = this._cutoutSurface.getWidth();
                 const sh = this._cutoutSurface.getHeight();
                 if (sw > 0 && sh > 0) {
-                    cr.scale(area.width / sw, area.height / sh);
+                    const scaleX = area.width / sw;
+                    const scaleY = area.height / sh;
+                    const scale = Math.max(scaleX, scaleY);
+                    const offsetX = (area.width - sw * scale) / 2;
+                    const offsetY = (area.height - sh * scale) / 2;
+
+                    cr.translate(offsetX, offsetY);
+                    cr.scale(scale, scale);
                     cr.setSourceSurface(this._cutoutSurface, 0, 0);
                     cr.paint();
                 }
@@ -403,7 +420,12 @@ export default class DepthClockExtension extends Extension {
         }
 
         // Adjust position once child sizes are laid out
-        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+        if (this._layoutIdleId) {
+            GLib.source_remove(this._layoutIdleId);
+            this._layoutIdleId = null;
+        }
+        this._layoutIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._layoutIdleId = null;
             if (this._clockWidget)
                 this._clockWidget._applyPosition();
             return GLib.SOURCE_REMOVE;
@@ -447,18 +469,22 @@ export default class DepthClockExtension extends Extension {
         return uri;
     }
 
-    _onWallpaperChanged() {
-        const wallpaperPath = this._getWallpaperPath();
-        if (!wallpaperPath || !GLib.file_test(wallpaperPath, GLib.FileTest.EXISTS))
-            return;
+    _calculateCropRatio(wallpaperPath, monitor) {
+        if (!wallpaperPath || !monitor) return null;
 
-        const monitor = this._getPrimaryMonitor();
-        if (!monitor) return;
+        let origW = 0, origH = 0;
+        try {
+            const [, w, h] = GdkPixbuf.Pixbuf.get_file_info(wallpaperPath);
+            origW = w;
+            origH = h;
+        } catch (e) {
+            return null;
+        }
 
-        // Calculate crop ratios if spanned or multi-monitor hydrapaper
+        if (origW <= 0 || origH <= 0) return null;
+
         const pictureOptions = this._bgSettings.get_string('picture-options');
         const isSpanned = pictureOptions === 'spanned' || wallpaperPath.includes('hydrapaper');
-        let cropRatio = null;
 
         if (isSpanned && Main.layoutManager.monitors.length > 1) {
             let minX = 0, minY = 0, maxX = 0, maxY = 0;
@@ -471,13 +497,53 @@ export default class DepthClockExtension extends Extension {
             const totalW = Math.max(1, maxX - minX);
             const totalH = Math.max(1, maxY - minY);
 
-            const rLeft = (monitor.x - minX) / totalW;
-            const rTop = (monitor.y - minY) / totalH;
-            const rRight = (monitor.x - minX + monitor.width) / totalW;
-            const rBottom = (monitor.y - minY + monitor.height) / totalH;
+            const scale = Math.max(totalW / origW, totalH / origH);
+            const destW = origW * scale;
+            const destH = origH * scale;
+            const canvasOffsetX = (totalW - destW) / 2;
+            const canvasOffsetY = (totalH - destH) / 2;
 
-            cropRatio = [rLeft.toFixed(4), rTop.toFixed(4), rRight.toFixed(4), rBottom.toFixed(4)];
+            const x1 = (monitor.x - minX - canvasOffsetX) / scale;
+            const y1 = (monitor.y - minY - canvasOffsetY) / scale;
+            const x2 = (monitor.x - minX + monitor.width - canvasOffsetX) / scale;
+            const y2 = (monitor.y - minY + monitor.height - canvasOffsetY) / scale;
+
+            const rLeft = Math.max(0, Math.min(1, x1 / origW));
+            const rTop = Math.max(0, Math.min(1, y1 / origH));
+            const rRight = Math.max(0, Math.min(1, x2 / origW));
+            const rBottom = Math.max(0, Math.min(1, y2 / origH));
+
+            return [rLeft.toFixed(6), rTop.toFixed(6), rRight.toFixed(6), rBottom.toFixed(6)];
         }
+
+        const scale = Math.max(monitor.width / origW, monitor.height / origH);
+        const destW = origW * scale;
+        const destH = origH * scale;
+        const offsetX = (monitor.width - destW) / 2;
+        const offsetY = (monitor.height - destH) / 2;
+
+        const x1 = -offsetX / scale;
+        const y1 = -offsetY / scale;
+        const x2 = x1 + monitor.width / scale;
+        const y2 = y1 + monitor.height / scale;
+
+        const rLeft = Math.max(0, Math.min(1, x1 / origW));
+        const rTop = Math.max(0, Math.min(1, y1 / origH));
+        const rRight = Math.max(0, Math.min(1, x2 / origW));
+        const rBottom = Math.max(0, Math.min(1, y2 / origH));
+
+        return [rLeft.toFixed(6), rTop.toFixed(6), rRight.toFixed(6), rBottom.toFixed(6)];
+    }
+
+    _onWallpaperChanged() {
+        const wallpaperPath = this._getWallpaperPath();
+        if (!wallpaperPath || !GLib.file_test(wallpaperPath, GLib.FileTest.EXISTS))
+            return;
+
+        const monitor = this._getPrimaryMonitor();
+        if (!monitor) return;
+
+        const cropRatio = this._calculateCropRatio(wallpaperPath, monitor);
 
         if (this._settings.get_boolean('auto-color'))
             this._updateAutoColor();
@@ -518,7 +584,6 @@ export default class DepthClockExtension extends Extension {
             this._cutoutSurface = cairo.ImageSurface.createFromPNG(cutoutPath);
             if (this._cutoutArea)
                 this._cutoutArea.queue_repaint();
-            console.log(`[DepthClock] Loaded cutout from ${cutoutPath}`);
         } catch (e) {
             console.error(`[DepthClock] Failed to load cutout surface: ${e}`);
             this._cutoutSurface = null;
@@ -554,28 +619,7 @@ export default class DepthClockExtension extends Extension {
         const monitor = this._getPrimaryMonitor();
         if (!monitor) return;
 
-        const pictureOptions = this._bgSettings.get_string('picture-options');
-        const isSpanned = pictureOptions === 'spanned' || wallpaperPath.includes('hydrapaper');
-        let cropRatio = null;
-
-        if (isSpanned && Main.layoutManager.monitors.length > 1) {
-            let minX = 0, minY = 0, maxX = 0, maxY = 0;
-            for (const m of Main.layoutManager.monitors) {
-                minX = Math.min(minX, m.x);
-                minY = Math.min(minY, m.y);
-                maxX = Math.max(maxX, m.x + m.width);
-                maxY = Math.max(maxY, m.y + m.height);
-            }
-            const totalW = Math.max(1, maxX - minX);
-            const totalH = Math.max(1, maxY - minY);
-            cropRatio = [
-                ((monitor.x - minX) / totalW).toFixed(4),
-                ((monitor.y - minY) / totalH).toFixed(4),
-                ((monitor.x - minX + monitor.width) / totalW).toFixed(4),
-                ((monitor.y - minY + monitor.height) / totalH).toFixed(4),
-            ];
-        }
-
+        const cropRatio = this._calculateCropRatio(wallpaperPath, monitor);
         const autoColor = this._extractWallpaperColor(wallpaperPath, cropRatio);
         if (autoColor && autoColor !== this._settings.get_string('clock-color'))
             this._settings.set_string('clock-color', autoColor);
@@ -694,10 +738,14 @@ export default class DepthClockExtension extends Extension {
 
     _generateCutoutAsync(wallpaperPath, outputPng, cropRatio) {
         const pythonBin = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'depth-clock', 'venv', 'bin', 'python3']);
-        const scriptPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'depth-clock', 'backend', 'segment.py']);
+        const modelPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'depth-clock', 'models', 'rmbg-1.4.onnx']);
+        let scriptPath = GLib.build_filenamev([this.path, 'backend', 'segment.py']);
+        if (!GLib.file_test(scriptPath, GLib.FileTest.EXISTS))
+            scriptPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'depth-clock', 'backend', 'segment.py']);
 
-        if (!GLib.file_test(pythonBin, GLib.FileTest.EXISTS) || !GLib.file_test(scriptPath, GLib.FileTest.EXISTS)) {
-            console.warn('[DepthClock] Python worker or segment script missing');
+        if (!GLib.file_test(pythonBin, GLib.FileTest.EXISTS) ||
+            !GLib.file_test(scriptPath, GLib.FileTest.EXISTS) ||
+            !GLib.file_test(modelPath, GLib.FileTest.EXISTS)) {
             return;
         }
 
@@ -722,19 +770,19 @@ export default class DepthClockExtension extends Extension {
             );
             this._activeSubprocess = proc;
 
-            proc.wait_async(null, (source, res) => {
+            proc.communicate_utf8_async(null, null, (source, res) => {
                 try {
-                    source.wait_finish(res);
+                    const [, stdout, stderr] = source.communicate_utf8_finish(res);
                     if (token !== this._requestToken)
                         return;
 
                     if (source.get_successful()) {
                         this._loadCutout(outputPng);
                     } else {
-                        console.warn(`[DepthClock] Worker exited with code ${source.get_exit_status()}`);
+                        console.warn(`[DepthClock] Worker exited with code ${source.get_exit_status()}: ${stderr || stdout}`);
                     }
                 } catch (err) {
-                    console.error(`[DepthClock] Subprocess wait error: ${err}`);
+                    console.error(`[DepthClock] Subprocess error: ${err}`);
                 }
             });
         } catch (e) {
@@ -746,6 +794,10 @@ export default class DepthClockExtension extends Extension {
         if (this._wallpaperTimerId) {
             GLib.source_remove(this._wallpaperTimerId);
             this._wallpaperTimerId = null;
+        }
+        if (this._layoutIdleId) {
+            GLib.source_remove(this._layoutIdleId);
+            this._layoutIdleId = null;
         }
         if (this._bgChangeId1) this._bgSettings.disconnect(this._bgChangeId1);
         if (this._bgChangeId2) this._bgSettings.disconnect(this._bgChangeId2);
