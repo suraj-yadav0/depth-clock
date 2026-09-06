@@ -114,6 +114,17 @@ install_backend() {
         mv "$tmp_model" "$MODEL_PATH"
     fi
 
+    if [ -f "$SCRIPT_DIR/fonts/Antonio-Bold.ttf" ]; then
+        local user_fonts="$HOME/.local/share/fonts"
+        mkdir -p "$user_fonts"
+        if [ ! -f "$user_fonts/Antonio-Bold.ttf" ]; then
+            cp "$SCRIPT_DIR/fonts/Antonio-Bold.ttf" "$user_fonts/"
+            if command -v fc-cache >/dev/null 2>&1; then
+                fc-cache -f "$user_fonts" >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+
     echo "[SUCCESS] AI segmentation backend is ready."
     exit 0
 }

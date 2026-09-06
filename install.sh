@@ -158,6 +158,10 @@ if [ -d "$SOURCE_DIR/extension/backend" ]; then
     mkdir -p "$EXTENSION_DIR/backend"
     cp -r "$SOURCE_DIR/extension/backend/"* "$EXTENSION_DIR/backend/"
 fi
+if [ -d "$SOURCE_DIR/extension/fonts" ]; then
+    mkdir -p "$EXTENSION_DIR/fonts"
+    cp -r "$SOURCE_DIR/extension/fonts/"* "$EXTENSION_DIR/fonts/"
+fi
 
 # Compile schemas
 glib-compile-schemas "$EXTENSION_DIR/schemas"
