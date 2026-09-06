@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-EXTENSION_ID="depth-clock@suraj.local"
+EXTENSION_ID="depth-clock@suraj-yadav0.github.io"
 REPO_URL="https://github.com/suraj-yadav0/depth-clock.git"
 ARCHIVE_URL="https://github.com/suraj-yadav0/depth-clock/archive/refs/heads/main.tar.gz"
 MODEL_URL="https://huggingface.co/briaai/RMBG-1.4/resolve/main/onnx/model.onnx"

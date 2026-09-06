@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-EXTENSION_ID="depth-clock@suraj.local"
+EXTENSION_ID="depth-clock@suraj-yadav0.github.io"
 DATA_DIR="$HOME/.local/share/depth-clock"
 EXTENSION_DIR="$HOME/.local/share/gnome-shell/extensions/$EXTENSION_ID"
 CACHE_DIR="$HOME/.cache/depth-clock"

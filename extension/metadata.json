@@ -1,7 +1,8 @@
 {
-  "uuid": "depth-clock@suraj.local",
+  "uuid": "depth-clock@suraj-yadav0.github.io",
   "name": "Depth Clock",
   "description": "Automatic depth effect wallpaper clock with foreground occlusion.",
+  "url": "https://github.com/suraj-yadav0/depth-clock",
   "shell-version": [
     "45",
     "46",

@@ -114,7 +114,7 @@ The installer will:
 2. Install required Python packages (`onnxruntime`, `numpy`, `pillow`).
 3. Download the RMBG-1.4 ONNX model (~176 MB) from Hugging Face into `~/.local/share/depth-clock/models/`.
 4. Install the Antonio Bold font into `~/.local/share/fonts/`.
-5. Deploy the GNOME extension to `~/.local/share/gnome-shell/extensions/depth-clock@suraj.local/`.
+5. Deploy the GNOME extension to `~/.local/share/gnome-shell/extensions/depth-clock@suraj-yadav0.github.io/`.
 6. Compile the GSettings schemas and enable the extension.
 
 ## Activating the Extension
@@ -127,13 +127,13 @@ After running the installer, reload GNOME Shell:
 Enable the extension if not enabled automatically:
 
 ```bash
-gnome-extensions enable depth-clock@suraj.local
+gnome-extensions enable depth-clock@suraj-yadav0.github.io
 ```
 
 Open extension settings:
 
 ```bash
-gnome-extensions prefs depth-clock@suraj.local
+gnome-extensions prefs depth-clock@suraj-yadav0.github.io
 ```
 
 ## Repository Structure
