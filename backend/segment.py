@@ -67,10 +67,10 @@ def process_wallpaper(input_path, output_png, crop_box=None, crop_ratio=None):
     if crop_ratio and len(crop_ratio) == 4:
         r_left, r_top, r_right, r_bottom = crop_ratio
         box = (
-            int(r_left * orig_w),
-            int(r_top * orig_h),
-            int(r_right * orig_w),
-            int(r_bottom * orig_h)
+            int(round(r_left * orig_w)),
+            int(round(r_top * orig_h)),
+            int(round(r_right * orig_w)),
+            int(round(r_bottom * orig_h))
         )
         orig_img = orig_img.crop(box)
     elif crop_box and len(crop_box) == 4:
@@ -97,13 +97,14 @@ def process_wallpaper(input_path, output_png, crop_box=None, crop_ratio=None):
     outputs = session.run(None, {input_name: img_data})
     raw_mask = outputs[0][0][0]
     
-    # Normalize mask 0..1
-    min_val = np.min(raw_mask)
-    max_val = np.max(raw_mask)
-    norm_mask = (raw_mask - min_val) / (max_val - min_val + 1e-8)
+    # RMBG-1.4 outputs probabilities in [0.0, 1.0].
+    # Clean background noise so transparent areas are strictly 0 to prevent ghosting.
+    prob_mask = np.clip(raw_mask, 0.0, 1.0)
+    cleaned_mask = np.where(prob_mask < 0.25, 0.0, prob_mask)
+    cleaned_mask = np.clip((cleaned_mask - 0.25) / 0.5, 0.0, 1.0)
     
     # Resize mask to original target dimensions
-    mask_u8 = (norm_mask * 255.0).astype(np.uint8)
+    mask_u8 = (cleaned_mask * 255.0).astype(np.uint8)
     mask_img = Image.fromarray(mask_u8, mode='L')
     mask_full = mask_img.resize((target_w, target_h), Image.Resampling.BILINEAR)
     
