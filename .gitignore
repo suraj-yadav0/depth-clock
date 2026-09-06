@@ -40,6 +40,8 @@ ENV/
 *.log
 gschemas.compiled
 !assets/**
+*.shell-extension.zip
+*.zip
 
 # IDE & OS files
 .vscode/

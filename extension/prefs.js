@@ -1,5 +1,6 @@
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import Gdk from 'gi://Gdk';
 import Pango from 'gi://Pango';
@@ -35,6 +36,107 @@ export default class DepthClockPreferences extends ExtensionPreferences {
         });
         settings.bind('auto-adapt', adaptRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         depthGroup.add(adaptRow);
+
+        // AI Model Backend Status & Setup
+        const setupScript = `${this.path}/setup-backend.sh`;
+        const pythonBin = `${GLib.get_home_dir()}/.local/share/depth-clock/venv/bin/python3`;
+        const modelPath = `${GLib.get_home_dir()}/.local/share/depth-clock/models/rmbg-1.4.onnx`;
+
+        const checkBackendInstalled = () => {
+            if (!GLib.file_test(pythonBin, GLib.FileTest.EXISTS))
+                return false;
+            if (!GLib.file_test(modelPath, GLib.FileTest.EXISTS))
+                return false;
+            try {
+                const info = Gio.File.new_for_path(modelPath).query_info(
+                    Gio.FILE_ATTRIBUTE_STANDARD_SIZE,
+                    Gio.FileQueryInfoFlags.NONE,
+                    null
+                );
+                return info.get_size() >= 150000000;
+            } catch (e) {
+                return false;
+            }
+        };
+
+        const backendRow = new Adw.ActionRow({
+            title: _('AI Model Status'),
+        });
+        depthGroup.add(backendRow);
+
+        const setupButton = new Gtk.Button({
+            valign: Gtk.Align.CENTER,
+        });
+        backendRow.add_suffix(setupButton);
+
+        const spinner = new Gtk.Spinner({
+            valign: Gtk.Align.CENTER,
+            visible: false,
+        });
+        backendRow.add_suffix(spinner);
+
+        const updateBackendUI = (isInstalled) => {
+            if (isInstalled) {
+                backendRow.subtitle = _('RMBG-1.4 model ready (~176 MB)');
+                setupButton.label = _('Reinstall');
+                setupButton.remove_css_class('suggested-action');
+                setupButton.sensitive = true;
+                spinner.visible = false;
+                spinner.spinning = false;
+            } else {
+                backendRow.subtitle = _('Model not installed. Download required for depth effect (~176 MB).');
+                setupButton.label = _('Download & Set Up');
+                setupButton.add_css_class('suggested-action');
+                setupButton.sensitive = true;
+                spinner.visible = false;
+                spinner.spinning = false;
+            }
+        };
+
+        updateBackendUI(checkBackendInstalled());
+
+        setupButton.connect('clicked', () => {
+            setupButton.sensitive = false;
+            spinner.visible = true;
+            spinner.spinning = true;
+            backendRow.subtitle = _('Setting up AI backend (this may take 1-2 minutes)...');
+
+            try {
+                const proc = Gio.Subprocess.new(
+                    ['/usr/bin/bash', setupScript, '--install'],
+                    Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
+                );
+
+                proc.communicate_utf8_async(null, null, (source, res) => {
+                    try {
+                        const [, stdout, stderr] = source.communicate_utf8_finish(res);
+                        if (source.get_successful()) {
+                            updateBackendUI(true);
+                            const current = settings.get_boolean('enable-depth');
+                            settings.set_boolean('enable-depth', !current);
+                            settings.set_boolean('enable-depth', current);
+                        } else {
+                            const errMatch = (stderr || stdout || '').match(/\[ERROR\]\s*(.*)/);
+                            const errMsg = errMatch ? errMatch[1] : _('Installation failed');
+                            backendRow.subtitle = errMsg;
+                            setupButton.sensitive = true;
+                            spinner.visible = false;
+                            spinner.spinning = false;
+                        }
+                    } catch (err) {
+                        backendRow.subtitle = `${err}`;
+                        setupButton.sensitive = true;
+                        spinner.visible = false;
+                        spinner.spinning = false;
+                    }
+                });
+            } catch (e) {
+                backendRow.subtitle = `${e}`;
+                setupButton.sensitive = true;
+                spinner.visible = false;
+                spinner.spinning = false;
+            }
+        });
 
         // Group: Appearance
         const appearGroup = new Adw.PreferencesGroup({

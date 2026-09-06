@@ -122,68 +122,11 @@ if [ -n "$missing_packages" ]; then
     fi
 fi
 
-# Set up Python virtual environment
-echo "--> Setting up Python virtual environment in $DATA_DIR/venv..."
-mkdir -p "$DATA_DIR/backend" "$DATA_DIR/models"
-if [ ! -f "$DATA_DIR/venv/bin/python3" ]; then
-    python3 -m venv "$DATA_DIR/venv"
-fi
+# Set up Python virtual environment and download AI model via setup-backend.sh
+echo "--> Setting up AI segmentation backend and model..."
+bash "$SOURCE_DIR/extension/setup-backend.sh" --install
 
-"$DATA_DIR/venv/bin/pip" install --quiet --upgrade pip
-"$DATA_DIR/venv/bin/pip" install --quiet -r "$SOURCE_DIR/backend/requirements.txt"
-echo "    [OK] Python dependencies installed."
-
-# Download AI Segmentation Model if missing or incomplete
-MODEL_PATH="$DATA_DIR/models/rmbg-1.4.onnx"
-download_model=false
-
-if [ ! -f "$MODEL_PATH" ]; then
-    download_model=true
-else
-    MODEL_SIZE=$(stat -c%s "$MODEL_PATH" 2>/dev/null || stat -f%z "$MODEL_PATH" 2>/dev/null || echo 0)
-    if [ "$MODEL_SIZE" -lt 150000000 ]; then
-        echo "--> Existing model appears incomplete. Re-downloading..."
-        download_model=true
-    fi
-fi
-
-if [ "$download_model" = true ]; then
-    echo "--> Downloading RMBG-1.4 segmentation model (~176 MB)..."
-    TMP_MODEL="$MODEL_PATH.tmp"
-    download_success=false
-
-    echo "    Attempting download from Hugging Face..."
-    if curl -L --fail --retry 3 --retry-delay 2 --connect-timeout 15 -C - --progress-bar -o "$TMP_MODEL" "$MODEL_URL"; then
-        download_success=true
-    else
-        echo "    [WARN] Primary download interrupted or failed. Trying mirror..."
-        if curl -L --fail --retry 3 --retry-delay 2 --connect-timeout 15 -C - --progress-bar -o "$TMP_MODEL" "$MODEL_MIRROR_URL"; then
-            download_success=true
-        fi
-    fi
-
-    if [ "$download_success" = false ]; then
-        echo "[ERROR] Failed to download model from primary source and mirror."
-        echo "    You can manually place model.onnx at: $MODEL_PATH"
-        rm -f "$TMP_MODEL"
-        exit 1
-    fi
-
-    TMP_SIZE=$(stat -c%s "$TMP_MODEL" 2>/dev/null || stat -f%z "$TMP_MODEL" 2>/dev/null || echo 0)
-    if [ "$TMP_SIZE" -lt 150000000 ]; then
-        echo "[ERROR] Downloaded model is incomplete or corrupted."
-        rm -f "$TMP_MODEL"
-        exit 1
-    fi
-
-    mv "$TMP_MODEL" "$MODEL_PATH"
-    echo "    [OK] Model downloaded successfully."
-else
-    echo "    [OK] Segmentation model already present."
-fi
-
-# Install backend segmentation script
-echo "--> Installing segmentation backend..."
+mkdir -p "$DATA_DIR/backend"
 cp "$SOURCE_DIR/backend/segment.py" "$DATA_DIR/backend/segment.py"
 chmod +x "$DATA_DIR/backend/segment.py"
 echo "    [OK] Backend installed to $DATA_DIR/backend/"
@@ -207,6 +150,14 @@ cp "$SOURCE_DIR/extension/prefs.js" "$EXTENSION_DIR/"
 cp "$SOURCE_DIR/extension/metadata.json" "$EXTENSION_DIR/"
 cp "$SOURCE_DIR/extension/stylesheet.css" "$EXTENSION_DIR/"
 cp "$SOURCE_DIR/extension/schemas/"*.gschema.xml "$EXTENSION_DIR/schemas/"
+if [ -f "$SOURCE_DIR/extension/setup-backend.sh" ]; then
+    cp "$SOURCE_DIR/extension/setup-backend.sh" "$EXTENSION_DIR/"
+    chmod +x "$EXTENSION_DIR/setup-backend.sh"
+fi
+if [ -d "$SOURCE_DIR/extension/backend" ]; then
+    mkdir -p "$EXTENSION_DIR/backend"
+    cp -r "$SOURCE_DIR/extension/backend/"* "$EXTENSION_DIR/backend/"
+fi
 
 # Compile schemas
 glib-compile-schemas "$EXTENSION_DIR/schemas"
