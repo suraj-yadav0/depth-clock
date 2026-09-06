@@ -22,16 +22,22 @@ A curated collection of wallpapers tested and optimized for Depth Clock is avail
 ## Features
 
 - Automatic Foreground Occlusion: Segments people, pets, architecture, and objects using on-device neural networks.
+- Adaptive Wallpaper Color:
+  - Automatically samples wallpaper luminance in the clock region (upper 12% to 50%).
+  - Extracts dominant, vibrant color accents in HLS color space and calculates contrast-optimized clock text colors.
+  - Automatically adapts between high-luminance tints on dark backgrounds and deep, readable tones on light backgrounds.
+  - Live updates when switching wallpapers, GNOME dark/light modes, or display layouts.
+  - Preference switch with live color badge and manual override via native GTK4 color selector dialog.
+- In-Preferences AI Setup: Check AI model readiness and download/reinstall model weights directly within GNOME extension settings.
 - Direct Desktop Controls: Click and drag the clock anywhere on your desktop to reposition. Scroll over the clock to resize dynamically.
 - Customization:
-  - Adaptive Wallpaper Color: Automatically analyzes wallpaper palette and luminance to adjust clock color for high contrast and aesthetic harmony.
-  - Native Font & Color Selectors: Choose installed system fonts and custom colors using GTK4 modal dialogs.
+  - Native Font & Color Selectors: Choose installed system fonts (weights, styles) and custom colors using GTK4 modal dialogs.
   - 12-hour or 24-hour time format.
   - Optional date indicator.
   - Stacked digits layout (hours on top, minutes below) or classic horizontal layout.
   - Automatic legibility safeguard (disables occlusion if the subject covers more than 85% of the digits).
 - 100% Local and Private: All segmentation runs locally using CPU-optimized ONNX Runtime. No images ever leave your computer.
-- Multi-Monitor Support: Handles primary display positioning and spanned wallpaper geometry.
+- Multi-Monitor Support: Handles primary display positioning, monitor aspect-fill scaling, and spanned wallpaper geometry.
 - Modern GNOME Support: Compatible with GNOME Shell 45, 46, 47, 48, 49, and 50+.
 
 ## How It Works
@@ -39,7 +45,8 @@ A curated collection of wallpapers tested and optimized for Depth Clock is avail
 1. The extension listens for wallpaper changes from `org.gnome.desktop.background`.
 2. When the wallpaper changes, a background Python worker runs the RMBG-1.4 model to generate an alpha cutout mask of foreground subjects.
 3. The generated mask is cached under `~/.cache/depth-clock/` keyed by wallpaper path, timestamp, and resolution.
-4. The extension inserts a layered container directly into GNOME Shell's background layer:
+4. When Adaptive Wallpaper Color is enabled, the extension analyzes the luminance of the clock area and extracts dominant accent hues to adjust text color automatically.
+5. The extension inserts a layered container directly into GNOME Shell's background layer:
    - Bottom: System wallpaper
    - Middle: Depth Clock widget
    - Top: Cairo drawing surface rendering the foreground cutout mask
@@ -91,7 +98,19 @@ sudo pacman -S python curl glib2
 
 ## Installation
 
-### One-Line Install
+### Single-Click Install (Extension Manager / ZIP)
+
+1. Download `depth-clock@suraj-yadav0.github.io.shell-extension.zip` from the latest [GitHub Release](https://github.com/suraj-yadav0/depth-clock/releases/latest).
+2. Open **Extension Manager** (or GNOME Extensions), click **Install from ZIP**, and select the downloaded archive.
+   Alternatively, install via terminal:
+   ```bash
+   gnome-extensions install --force depth-clock@suraj-yadav0.github.io.shell-extension.zip
+   gnome-extensions enable depth-clock@suraj-yadav0.github.io
+   ```
+3. Restart GNOME Shell (log out and back in on Wayland, or press `Alt+F2`, type `r`, and press `Enter` on X11).
+4. Open extension preferences (`gnome-extensions prefs depth-clock@suraj-yadav0.github.io`) and click **Download & Set Up** under **AI Model Status** to initialize the AI backend.
+
+### One-Line Automated Install
 
 Run the installer directly from your terminal:
 
