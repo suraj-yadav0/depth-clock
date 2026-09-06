@@ -4,8 +4,6 @@ Depth Clock is a GNOME Shell extension that brings an iOS-style 3D depth effect 
 
 ## Previews
 
-![Depth Clock Desktop Preview](assets/screenshots/preview-hero.png)
-
 | | |
 | :---: | :---: |
 | ![Depth Clock Preview 1](assets/screenshots/screenshot-1.png) | ![Depth Clock Preview 2](assets/screenshots/screenshot-2.png) |
