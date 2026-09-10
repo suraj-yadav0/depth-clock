@@ -16,26 +16,144 @@ export default class DepthClockPreferences extends ExtensionPreferences {
         });
         window.add(page);
 
-        // Group: Depth Effect
-        const depthGroup = new Adw.PreferencesGroup({
-            title: _('3D Depth Effect'),
-            description: _('Place clock digits behind foreground objects in the wallpaper'),
+        // Group: Subject Interaction Mode
+        const modeGroup = new Adw.PreferencesGroup({
+            title: _('Subject Interaction Mode'),
+            description: _('Choose how clock digits interact with detected foreground subjects'),
         });
-        page.add(depthGroup);
+        page.add(modeGroup);
 
-        const depthRow = new Adw.SwitchRow({
-            title: _('Enable Depth Effect'),
-            subtitle: _('Occlude clock text behind detected foreground subjects'),
+        const modeModel = new Gtk.StringList();
+        modeModel.append(_('3D Depth (Behind Subject)'));
+        modeModel.append(_('Contour-Adaptive (Over Subject)'));
+        modeModel.append(_('Standard Flat Clock (No Interaction)'));
+
+        const modeRow = new Adw.ComboRow({
+            title: _('Clock Mode'),
+            subtitle: _('Behind subject, contour hugging over subject, or standard flat'),
+            model: modeModel,
         });
-        settings.bind('enable-depth', depthRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        depthGroup.add(depthRow);
+        modeGroup.add(modeRow);
 
+        // 3D Depth mode options
         const adaptRow = new Adw.SwitchRow({
             title: _('Auto-Adapt Legibility'),
             subtitle: _('Temporarily disable depth if foreground obscures more than 85% of time'),
         });
         settings.bind('auto-adapt', adaptRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        depthGroup.add(adaptRow);
+        modeGroup.add(adaptRow);
+
+        // Contour Adaptive options
+        const contourStyleModel = new Gtk.StringList();
+        contourStyleModel.append(_('Vertical Stretch (Kinetic)'));
+        contourStyleModel.append(_('Proportional Fit'));
+
+        const contourStyleRow = new Adw.ComboRow({
+            title: _('Contour Adaptation Style'),
+            subtitle: _('Stretch vertically to hug contour, or scale proportionally'),
+            model: contourStyleModel,
+        });
+        modeGroup.add(contourStyleRow);
+
+        const dualToneRow = new Adw.SwitchRow({
+            title: _('Dual-Tone Digits'),
+            subtitle: _('Accent color for hours and contrasting tone for minutes over subject'),
+        });
+        settings.bind('dual-tone', dualToneRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        modeGroup.add(dualToneRow);
+
+        const clearanceRow = new Adw.SpinRow({
+            title: _('Contour Clearance (px)'),
+            subtitle: _('Spacing between digits and subject silhouette'),
+            adjustment: new Gtk.Adjustment({
+                lower: -20,
+                upper: 60,
+                step_increment: 2,
+                page_increment: 5,
+                value: settings.get_int('contour-clearance'),
+            }),
+            digits: 0,
+        });
+        clearanceRow.connect('notify::value', (spin) => {
+            settings.set_int('contour-clearance', Math.round(spin.get_value()));
+        });
+        settings.connect('changed::contour-clearance', () => {
+            clearanceRow.set_value(settings.get_int('contour-clearance'));
+        });
+        modeGroup.add(clearanceRow);
+
+        let stackRow = null;
+        let isSyncing = false;
+
+        const updateModeUI = () => {
+            if (isSyncing) return;
+            isSyncing = true;
+
+            const modeStr = settings.get_string('clock-mode');
+            const isContour = settings.get_boolean('contour-mode') || modeStr === 'contour-stretch';
+            const isDepth = settings.get_boolean('enable-depth') && !isContour;
+
+            let selectedIndex = 2;
+            if (isContour) {
+                selectedIndex = 1;
+            } else if (isDepth || modeStr === 'depth') {
+                selectedIndex = 0;
+            }
+
+            if (modeRow.selected !== selectedIndex)
+                modeRow.selected = selectedIndex;
+
+            const currentStyle = settings.get_string('contour-style');
+            const styleIndex = currentStyle === 'fit' ? 1 : 0;
+            if (contourStyleRow.selected !== styleIndex)
+                contourStyleRow.selected = styleIndex;
+
+            adaptRow.visible = (selectedIndex === 0);
+            contourStyleRow.visible = (selectedIndex === 1);
+            dualToneRow.visible = (selectedIndex === 1);
+            clearanceRow.visible = (selectedIndex === 1);
+
+            if (stackRow) {
+                stackRow.sensitive = (selectedIndex !== 1);
+                stackRow.subtitle = (selectedIndex === 1)
+                    ? _('Contour-adaptive mode requires horizontal digit layout')
+                    : _('Display hour on top and minute below instead of single row');
+            }
+
+            isSyncing = false;
+        };
+
+        modeRow.connect('notify::selected', () => {
+            if (isSyncing) return;
+            isSyncing = true;
+            const sel = modeRow.selected;
+            if (sel === 0) {
+                settings.set_string('clock-mode', 'depth');
+                settings.set_boolean('enable-depth', true);
+                settings.set_boolean('contour-mode', false);
+            } else if (sel === 1) {
+                settings.set_string('clock-mode', 'contour-stretch');
+                settings.set_boolean('enable-depth', false);
+                settings.set_boolean('contour-mode', true);
+            } else {
+                settings.set_string('clock-mode', 'flat');
+                settings.set_boolean('enable-depth', false);
+                settings.set_boolean('contour-mode', false);
+            }
+            isSyncing = false;
+            updateModeUI();
+        });
+
+        contourStyleRow.connect('notify::selected', () => {
+            if (isSyncing) return;
+            const style = contourStyleRow.selected === 1 ? 'fit' : 'stretch';
+            settings.set_string('contour-style', style);
+        });
+
+        settings.connect('changed::clock-mode', updateModeUI);
+        settings.connect('changed::contour-mode', updateModeUI);
+        settings.connect('changed::enable-depth', updateModeUI);
+        settings.connect('changed::contour-style', updateModeUI);
 
         // AI Model Backend Status & Setup
         const setupScript = `${this.path}/setup-backend.sh`;
@@ -62,7 +180,7 @@ export default class DepthClockPreferences extends ExtensionPreferences {
         const backendRow = new Adw.ActionRow({
             title: _('AI Model Status'),
         });
-        depthGroup.add(backendRow);
+        modeGroup.add(backendRow);
 
         const setupButton = new Gtk.Button({
             valign: Gtk.Align.CENTER,
@@ -284,12 +402,14 @@ export default class DepthClockPreferences extends ExtensionPreferences {
         appearGroup.add(opacityRow);
 
         // Stacked Digits
-        const stackRow = new Adw.SwitchRow({
+        stackRow = new Adw.SwitchRow({
             title: _('Stack Hours and Minutes'),
             subtitle: _('Display hour on top and minute below instead of single row'),
         });
         settings.bind('stack-digits', stackRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         appearGroup.add(stackRow);
+
+        updateModeUI();
 
         // Group: Position
         const posGroup = new Adw.PreferencesGroup({
