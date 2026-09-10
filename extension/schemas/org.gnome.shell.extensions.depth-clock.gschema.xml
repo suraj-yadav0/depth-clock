@@ -49,5 +49,25 @@
       <default>true</default>
       <summary>Automatically adapt clock color to match wallpaper palette</summary>
     </key>
+    <key name="clock-mode" type="s">
+      <default>'depth'</default>
+      <summary>Clock interaction mode: depth, contour-stretch, or flat</summary>
+    </key>
+    <key name="contour-mode" type="b">
+      <default>false</default>
+      <summary>Additional mode: dynamically resize clock letters over foreground objects</summary>
+    </key>
+    <key name="dual-tone" type="b">
+      <default>true</default>
+      <summary>Use dual-tone accent colors in contour adaptive stretch mode</summary>
+    </key>
+    <key name="contour-clearance" type="i">
+      <default>8</default>
+      <summary>Pixel clearance margin between clock digits and subject contour</summary>
+    </key>
+    <key name="contour-style" type="s">
+      <default>'stretch'</default>
+      <summary>Contour adaptation style: stretch or fit</summary>
+    </key>
   </schema>
 </schemalist>
