@@ -7,7 +7,7 @@ import urllib.parse
 from pathlib import Path
 import colorsys
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 import onnxruntime as ort
 
 MODEL_PATH = Path.home() / '.local/share/depth-clock/models/rmbg-1.4.onnx'
@@ -122,6 +122,20 @@ def process_wallpaper(input_path, output_png, crop_box=None, crop_ratio=None):
     clock_occlusion = float(np.mean(clock_zone > 128))
     total_foreground = float(np.mean(mask_arr > 128))
     
+    clean_for_contour = mask_full.filter(ImageFilter.MedianFilter(size=5))
+    contour_mask_arr = np.array(clean_for_contour)
+    is_fg = contour_mask_arr > 128
+    has_fg = np.any(is_fg, axis=0)
+    first_fg_y = np.where(has_fg, np.argmax(is_fg, axis=0), target_h)
+
+    sample_indices = np.linspace(0, target_w - 1, 256, dtype=int)
+    raw_samples = [float(first_fg_y[idx]) / target_h for idx in sample_indices]
+
+    kernel = np.array([0.05, 0.2, 0.5, 0.2, 0.05])
+    padded = np.pad(raw_samples, (2, 2), mode='edge')
+    smoothed = np.convolve(padded, kernel, mode='valid')
+    contour_samples = [round(float(v), 4) for v in smoothed]
+
     meta = {
         "width": target_w,
         "height": target_h,
@@ -129,6 +143,7 @@ def process_wallpaper(input_path, output_png, crop_box=None, crop_ratio=None):
         "clock_zone_occlusion": round(clock_occlusion, 3),
         "depth_viable": clock_occlusion < 0.85 and total_foreground > 0.05,
         "suggested_color": compute_adaptive_clock_color(orig_img),
+        "contour_samples": contour_samples,
         "render_time": round(time.time() - start_time, 2)
     }
     
