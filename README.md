@@ -24,6 +24,10 @@ A curated collection of wallpapers tested and optimized for Depth Clock is avail
 - Multiple Subject Interaction Modes:
   - 3D Depth Effect (Behind Subject): Segments foreground subjects and places clock digits tucked naturally behind them.
   - Contour-Adaptive Mode (Over Subject): Clock digits dynamically adapt to the foreground subject contour, rendered directly over the subject with dual-tone styling (wallpaper accent for hours, clean contrasting tone for minutes), customizable clearance padding, and both vertical stretch and proportional fit options.
+  - Silhouette Inversion (Negative Space): Digits pass across the subject boundary. Text outside the subject displays in your chosen clock color, while intersecting segments inside the silhouette dynamically render in contrasting tone, stencil outline, or vivid accent color.
+  - Interactive Depth Parallax: Mouse movement across your desktop triggers subtle, multi-plane 3D spatial shifts between the background wallpaper, clock layer, and foreground subject.
+  - Backlit Aura (Silhouette Rim Glow): Clock digits sit behind the subject, casting an illuminated edge halo and neon rim along the contour of the foreground subject where the digits intersect it.
+  - Silhouette Flow (Contour Baseline): Clock digits follow the elevation and baseline curve of the subject contour, perching and flowing naturally along the silhouette.
   - Standard Flat Clock: Pure 2D clock display without subject occlusion or deformation.
 - Automatic Foreground Occlusion: Segments people, pets, architecture, and objects using on-device neural networks.
 - Adaptive Wallpaper Color:
