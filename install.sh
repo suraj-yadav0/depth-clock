@@ -164,6 +164,9 @@ fi
 
 # Compile schemas
 glib-compile-schemas "$EXTENSION_DIR/schemas"
+mkdir -p "$HOME/.local/share/glib-2.0/schemas"
+cp "$SOURCE_DIR/extension/schemas/"*.gschema.xml "$HOME/.local/share/glib-2.0/schemas/"
+glib-compile-schemas "$HOME/.local/share/glib-2.0/schemas" 2>/dev/null || true
 echo "    [OK] GSettings schemas compiled."
 
 # Attempt to enable the extension

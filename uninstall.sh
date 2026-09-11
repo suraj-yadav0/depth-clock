@@ -28,6 +28,11 @@ if [ -d "$CACHE_DIR" ]; then
     rm -rf "$CACHE_DIR"
 fi
 
+if [ -f "$HOME/.local/share/glib-2.0/schemas/org.gnome.shell.extensions.depth-clock.gschema.xml" ]; then
+    rm -f "$HOME/.local/share/glib-2.0/schemas/org.gnome.shell.extensions.depth-clock.gschema.xml"
+    glib-compile-schemas "$HOME/.local/share/glib-2.0/schemas" 2>/dev/null || true
+fi
+
 echo ""
 echo "=== Uninstallation Complete ==="
 echo "Please restart GNOME Shell to finish unloading the extension."
