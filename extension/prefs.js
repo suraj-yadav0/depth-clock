@@ -9,6 +9,7 @@ import { ExtensionPreferences, gettext as _ } from 'resource:///org/gnome/Shell/
 export default class DepthClockPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
+        const toHex = (n) => Math.round(Math.max(0, Math.min(1, n)) * 255).toString(16).padStart(2, '0');
 
         const page = new Adw.PreferencesPage({
             title: _('General'),
@@ -171,6 +172,43 @@ export default class DepthClockPreferences extends ExtensionPreferences {
         });
         modeGroup.add(glowIntensityRow);
 
+        const currentGlowColor = settings.get_string('glow-color') || '#ffffff';
+        const glowRgba = new Gdk.RGBA();
+        if (!glowRgba.parse(currentGlowColor))
+            glowRgba.parse('#ffffff');
+
+        const glowColorRow = new Adw.ActionRow({
+            title: _('Rim Glow Color'),
+            subtitle: currentGlowColor,
+        });
+
+        const glowColorDialog = new Gtk.ColorDialog({
+            modal: true,
+            with_alpha: false,
+        });
+        const glowColorButton = new Gtk.ColorDialogButton({
+            dialog: glowColorDialog,
+            rgba: glowRgba,
+            valign: Gtk.Align.CENTER,
+        });
+        glowColorRow.add_suffix(glowColorButton);
+
+        glowColorButton.connect('notify::rgba', () => {
+            const c = glowColorButton.get_rgba();
+            const hex = `#${toHex(c.red)}${toHex(c.green)}${toHex(c.blue)}`;
+            settings.set_string('glow-color', hex);
+            glowColorRow.subtitle = hex;
+        });
+
+        settings.connect('changed::glow-color', () => {
+            const val = settings.get_string('glow-color') || '#ffffff';
+            const updatedRgba = new Gdk.RGBA();
+            if (updatedRgba.parse(val))
+                glowColorButton.set_rgba(updatedRgba);
+            glowColorRow.subtitle = val;
+        });
+        modeGroup.add(glowColorRow);
+
         // Silhouette Flow options
         const flowClearanceRow = new Adw.SpinRow({
             title: _('Flow Clearance (px)'),
@@ -230,6 +268,7 @@ export default class DepthClockPreferences extends ExtensionPreferences {
             parallaxRow.visible = (selectedIndex === 3);
             glowRadiusRow.visible = (selectedIndex === 4);
             glowIntensityRow.visible = (selectedIndex === 4);
+            glowColorRow.visible = (selectedIndex === 4);
             flowClearanceRow.visible = (selectedIndex === 5);
 
             if (stackRow) {
@@ -456,8 +495,6 @@ export default class DepthClockPreferences extends ExtensionPreferences {
             rgba: rgba,
             valign: Gtk.Align.CENTER,
         });
-
-        const toHex = (n) => Math.round(Math.max(0, Math.min(1, n)) * 255).toString(16).padStart(2, '0');
 
         const syncColorState = () => {
             const isAuto = settings.get_boolean('auto-color');
