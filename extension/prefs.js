@@ -23,19 +23,33 @@ export default class DepthClockPreferences extends ExtensionPreferences {
         });
         page.add(modeGroup);
 
+        const MODE_KEYS = [
+            'depth',
+            'contour-stretch',
+            'silhouette-invert',
+            'depth-parallax',
+            'rim-glow',
+            'contour-flow',
+            'flat',
+        ];
+
         const modeModel = new Gtk.StringList();
         modeModel.append(_('3D Depth (Behind Subject)'));
         modeModel.append(_('Contour-Adaptive (Over Subject)'));
+        modeModel.append(_('Silhouette Inversion (Negative Space)'));
+        modeModel.append(_('Interactive Depth Parallax'));
+        modeModel.append(_('Backlit Aura (Silhouette Rim Glow)'));
+        modeModel.append(_('Silhouette Flow (Contour Baseline)'));
         modeModel.append(_('Standard Flat Clock (No Interaction)'));
 
         const modeRow = new Adw.ComboRow({
             title: _('Clock Mode'),
-            subtitle: _('Behind subject, contour hugging over subject, or standard flat'),
+            subtitle: _('Interaction behavior with detected foreground subjects'),
             model: modeModel,
         });
         modeGroup.add(modeRow);
 
-        // 3D Depth mode options
+        // 3D Depth / Legibility option
         const adaptRow = new Adw.SwitchRow({
             title: _('Auto-Adapt Legibility'),
             subtitle: _('Temporarily disable depth if foreground obscures more than 85% of time'),
@@ -82,6 +96,102 @@ export default class DepthClockPreferences extends ExtensionPreferences {
         });
         modeGroup.add(clearanceRow);
 
+        // Silhouette Inversion options
+        const invertStyleModel = new Gtk.StringList();
+        invertStyleModel.append(_('Contrasting Tone (Solid)'));
+        invertStyleModel.append(_('Stencil Outline'));
+        invertStyleModel.append(_('Vibrant Accent'));
+
+        const invertStyleRow = new Adw.ComboRow({
+            title: _('Inversion Style'),
+            subtitle: _('Render style for the portion of digits over the subject'),
+            model: invertStyleModel,
+        });
+        modeGroup.add(invertStyleRow);
+
+        // Interactive Parallax options
+        const parallaxRow = new Adw.SpinRow({
+            title: _('Parallax Motion Intensity (px)'),
+            subtitle: _('Maximum 3D displacement responding to pointer movement'),
+            adjustment: new Gtk.Adjustment({
+                lower: 4,
+                upper: 30,
+                step_increment: 2,
+                page_increment: 4,
+                value: settings.get_int('parallax-intensity'),
+            }),
+            digits: 0,
+        });
+        parallaxRow.connect('notify::value', (spin) => {
+            settings.set_int('parallax-intensity', Math.round(spin.get_value()));
+        });
+        settings.connect('changed::parallax-intensity', () => {
+            parallaxRow.set_value(settings.get_int('parallax-intensity'));
+        });
+        modeGroup.add(parallaxRow);
+
+        // Rim Glow options
+        const glowRadiusRow = new Adw.SpinRow({
+            title: _('Rim Glow Radius (px)'),
+            subtitle: _('Spread of illuminated edge halo along silhouette contour'),
+            adjustment: new Gtk.Adjustment({
+                lower: 6,
+                upper: 32,
+                step_increment: 2,
+                page_increment: 4,
+                value: settings.get_int('glow-radius'),
+            }),
+            digits: 0,
+        });
+        glowRadiusRow.connect('notify::value', (spin) => {
+            settings.set_int('glow-radius', Math.round(spin.get_value()));
+        });
+        settings.connect('changed::glow-radius', () => {
+            glowRadiusRow.set_value(settings.get_int('glow-radius'));
+        });
+        modeGroup.add(glowRadiusRow);
+
+        const glowIntensityRow = new Adw.SpinRow({
+            title: _('Rim Glow Intensity'),
+            subtitle: _('Brightness multiplier for the backlit silhouette glow'),
+            adjustment: new Gtk.Adjustment({
+                lower: 0.2,
+                upper: 1.0,
+                step_increment: 0.05,
+                page_increment: 0.1,
+                value: settings.get_double('glow-intensity'),
+            }),
+            digits: 2,
+        });
+        glowIntensityRow.connect('notify::value', (spin) => {
+            settings.set_double('glow-intensity', Math.round(spin.get_value() * 100) / 100);
+        });
+        settings.connect('changed::glow-intensity', () => {
+            glowIntensityRow.set_value(settings.get_double('glow-intensity'));
+        });
+        modeGroup.add(glowIntensityRow);
+
+        // Silhouette Flow options
+        const flowClearanceRow = new Adw.SpinRow({
+            title: _('Flow Clearance (px)'),
+            subtitle: _('Spacing between flowing digits and subject silhouette contour'),
+            adjustment: new Gtk.Adjustment({
+                lower: -20,
+                upper: 60,
+                step_increment: 2,
+                page_increment: 5,
+                value: settings.get_int('flow-clearance'),
+            }),
+            digits: 0,
+        });
+        flowClearanceRow.connect('notify::value', (spin) => {
+            settings.set_int('flow-clearance', Math.round(spin.get_value()));
+        });
+        settings.connect('changed::flow-clearance', () => {
+            flowClearanceRow.set_value(settings.get_int('flow-clearance'));
+        });
+        modeGroup.add(flowClearanceRow);
+
         let stackRow = null;
         let isSyncing = false;
 
@@ -90,14 +200,11 @@ export default class DepthClockPreferences extends ExtensionPreferences {
             isSyncing = true;
 
             const modeStr = settings.get_string('clock-mode');
-            const isContour = settings.get_boolean('contour-mode') || modeStr === 'contour-stretch';
-            const isDepth = settings.get_boolean('enable-depth') && !isContour;
-
-            let selectedIndex = 2;
-            if (isContour) {
-                selectedIndex = 1;
-            } else if (isDepth || modeStr === 'depth') {
-                selectedIndex = 0;
+            let selectedIndex = MODE_KEYS.indexOf(modeStr);
+            if (selectedIndex === -1) {
+                if (settings.get_boolean('contour-mode')) selectedIndex = 1;
+                else if (settings.get_boolean('enable-depth')) selectedIndex = 0;
+                else selectedIndex = 6;
             }
 
             if (modeRow.selected !== selectedIndex)
@@ -108,15 +215,28 @@ export default class DepthClockPreferences extends ExtensionPreferences {
             if (contourStyleRow.selected !== styleIndex)
                 contourStyleRow.selected = styleIndex;
 
-            adaptRow.visible = (selectedIndex === 0);
+            const currentInvert = settings.get_string('invert-style');
+            let invertIndex = 0;
+            if (currentInvert === 'outline') invertIndex = 1;
+            else if (currentInvert === 'accent') invertIndex = 2;
+            if (invertStyleRow.selected !== invertIndex)
+                invertStyleRow.selected = invertIndex;
+
+            adaptRow.visible = (selectedIndex === 0 || selectedIndex === 3 || selectedIndex === 4);
             contourStyleRow.visible = (selectedIndex === 1);
-            dualToneRow.visible = (selectedIndex === 1);
+            dualToneRow.visible = (selectedIndex === 1 || selectedIndex === 5);
             clearanceRow.visible = (selectedIndex === 1);
+            invertStyleRow.visible = (selectedIndex === 2);
+            parallaxRow.visible = (selectedIndex === 3);
+            glowRadiusRow.visible = (selectedIndex === 4);
+            glowIntensityRow.visible = (selectedIndex === 4);
+            flowClearanceRow.visible = (selectedIndex === 5);
 
             if (stackRow) {
-                stackRow.sensitive = (selectedIndex !== 1);
-                stackRow.subtitle = (selectedIndex === 1)
-                    ? _('Contour-adaptive mode requires horizontal digit layout')
+                const isContourLayout = (selectedIndex === 1 || selectedIndex === 5);
+                stackRow.sensitive = !isContourLayout;
+                stackRow.subtitle = isContourLayout
+                    ? _('Contour-following modes require horizontal digit layout')
                     : _('Display hour on top and minute below instead of single row');
             }
 
@@ -127,19 +247,16 @@ export default class DepthClockPreferences extends ExtensionPreferences {
             if (isSyncing) return;
             isSyncing = true;
             const sel = modeRow.selected;
-            if (sel === 0) {
-                settings.set_string('clock-mode', 'depth');
-                settings.set_boolean('enable-depth', true);
-                settings.set_boolean('contour-mode', false);
-            } else if (sel === 1) {
-                settings.set_string('clock-mode', 'contour-stretch');
-                settings.set_boolean('enable-depth', false);
-                settings.set_boolean('contour-mode', true);
-            } else {
-                settings.set_string('clock-mode', 'flat');
-                settings.set_boolean('enable-depth', false);
-                settings.set_boolean('contour-mode', false);
-            }
+            const targetMode = MODE_KEYS[sel] || 'depth';
+            settings.set_string('clock-mode', targetMode);
+            settings.set_boolean(
+                'enable-depth',
+                targetMode === 'depth' ||
+                targetMode === 'depth-parallax' ||
+                targetMode === 'rim-glow' ||
+                targetMode === 'silhouette-invert'
+            );
+            settings.set_boolean('contour-mode', targetMode === 'contour-stretch');
             isSyncing = false;
             updateModeUI();
         });
@@ -150,10 +267,18 @@ export default class DepthClockPreferences extends ExtensionPreferences {
             settings.set_string('contour-style', style);
         });
 
+        invertStyleRow.connect('notify::selected', () => {
+            if (isSyncing) return;
+            const styles = ['contrast', 'outline', 'accent'];
+            const style = styles[invertStyleRow.selected] || 'contrast';
+            settings.set_string('invert-style', style);
+        });
+
         settings.connect('changed::clock-mode', updateModeUI);
         settings.connect('changed::contour-mode', updateModeUI);
         settings.connect('changed::enable-depth', updateModeUI);
         settings.connect('changed::contour-style', updateModeUI);
+        settings.connect('changed::invert-style', updateModeUI);
 
         // AI Model Backend Status & Setup
         const setupScript = `${this.path}/setup-backend.sh`;
