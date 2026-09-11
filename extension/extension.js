@@ -51,8 +51,11 @@ const ClockWidget = GObject.registerClass(
             this._dragActorStartX = 0;
             this._dragActorStartY = 0;
             this._scrollTimerId = null;
+            this._positionIdleId = null;
             this._currentScale = null;
             this._digitMetrics = null;
+            this._cachedFontDesc = null;
+            this._cachedDateDesc = null;
             this._lastTimeString = '';
             this._lastDateString = '';
 
@@ -96,7 +99,12 @@ const ClockWidget = GObject.registerClass(
                     const targetX = Math.round(bounds.width * rx - clockW / 2);
                     const targetY = Math.round(bounds.height * ry - (baseH / 2 + padY));
                     if (this.x !== targetX || this.y !== targetY) {
-                        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                        if (this._positionIdleId) {
+                            GLib.source_remove(this._positionIdleId);
+                            this._positionIdleId = null;
+                        }
+                        this._positionIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                            this._positionIdleId = null;
                             if (!this._isDragging && !this._isSavingPosition)
                                 this.set_position(targetX, targetY);
                             return GLib.SOURCE_REMOVE;
@@ -227,6 +235,7 @@ const ClockWidget = GObject.registerClass(
                     this._lastTimeString = '';
                     this._lastDateString = '';
                     this._updateClock();
+                    this._scheduleNextTick();
                 }
             });
 
@@ -234,10 +243,22 @@ const ClockWidget = GObject.registerClass(
             this._applyStyles();
             this._applyPosition();
             this._updateClock();
+            this._scheduleNextTick();
+        }
 
-            this._tickerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1, () => {
+        _scheduleNextTick() {
+            if (this._tickerId) {
+                GLib.source_remove(this._tickerId);
+                this._tickerId = null;
+            }
+            const now = GLib.DateTime.new_now_local();
+            const msUntilNextMinute = (60 - now.get_second()) * 1000 - Math.floor(now.get_microsecond() / 1000) + 100;
+            const delay = Math.max(250, msUntilNextMinute);
+            this._tickerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+                this._tickerId = null;
                 this._updateClock();
-                return GLib.SOURCE_CONTINUE;
+                this._scheduleNextTick();
+                return GLib.SOURCE_REMOVE;
             });
         }
 
@@ -271,6 +292,11 @@ const ClockWidget = GObject.registerClass(
             const dateSize = Math.round(24 * scale);
 
             const fontDesc = Pango.FontDescription.from_string(font);
+            fontDesc.set_size(fontSize * Pango.SCALE);
+            if (!fontDesc.get_weight() || fontDesc.get_weight() === Pango.Weight.NORMAL)
+                fontDesc.set_weight(Pango.Weight.BOLD);
+            this._cachedFontDesc = fontDesc;
+
             const fontFamily = fontDesc.get_family() || font;
             const fontWeight = fontDesc.get_weight();
             const weightCss = fontWeight && fontWeight !== Pango.Weight.NORMAL
@@ -279,6 +305,8 @@ const ClockWidget = GObject.registerClass(
             const styleCss = fontDesc.get_style() !== Pango.Style.NORMAL
                 ? 'font-style: italic;'
                 : '';
+
+            this._cachedDateDesc = Pango.FontDescription.from_string(`${fontFamily} ${dateSize}px`);
 
             this._timeLabel.set_style(
                 `font-family: '${fontFamily}', sans-serif; ${weightCss} ${styleCss} font-size: ${fontSize}px; color: ${color}; line-height: ${isStacked ? 0.82 : 0.9};`
@@ -294,10 +322,7 @@ const ClockWidget = GObject.registerClass(
 
                 const tempSurface = new cairo.ImageSurface(cairo.Format.ARGB32, 1, 1);
                 const cr = new cairo.Context(tempSurface);
-                const layoutDesc = Pango.FontDescription.from_string(font);
-                layoutDesc.set_size(fontSize * Pango.SCALE);
-                if (!layoutDesc.get_weight() || layoutDesc.get_weight() === Pango.Weight.NORMAL)
-                    layoutDesc.set_weight(Pango.Weight.BOLD);
+                const layoutDesc = fontDesc;
 
                 const layout = PangoCairo.create_layout(cr);
                 layout.set_font_description(layoutDesc);
@@ -682,15 +707,17 @@ const ClockWidget = GObject.registerClass(
             if (!text) return;
 
             const isStacked = this._settings.get_boolean('stack-digits');
-            const font = this._settings.get_string('clock-font');
             const scale = this._currentScale ?? this._settings.get_double('clock-scale');
-            const baseFontSize = isStacked ? 190 : 250;
-            const fontSize = Math.round(baseFontSize * scale);
-
-            const fontDesc = Pango.FontDescription.from_string(font);
-            fontDesc.set_size(fontSize * Pango.SCALE);
-            if (!fontDesc.get_weight() || fontDesc.get_weight() === Pango.Weight.NORMAL)
-                fontDesc.set_weight(Pango.Weight.BOLD);
+            const fontDesc = this._cachedFontDesc ?? (() => {
+                const font = this._settings.get_string('clock-font');
+                const baseFontSize = isStacked ? 190 : 250;
+                const fontSize = Math.round(baseFontSize * scale);
+                const fd = Pango.FontDescription.from_string(font);
+                fd.set_size(fontSize * Pango.SCALE);
+                if (!fd.get_weight() || fd.get_weight() === Pango.Weight.NORMAL)
+                    fd.set_weight(Pango.Weight.BOLD);
+                return fd;
+            })();
 
             const layout = PangoCairo.create_layout(cr);
             layout.set_font_description(fontDesc);
@@ -740,7 +767,7 @@ const ClockWidget = GObject.registerClass(
             if (this._dateLabel && this._dateLabel.visible) {
                 const dateText = this._dateLabel.get_text();
                 if (dateText) {
-                    const dateDesc = Pango.FontDescription.from_string(`${fontDesc.get_family() || 'Cantarell'} ${Math.round(24 * scale)}px`);
+                    const dateDesc = this._cachedDateDesc ?? Pango.FontDescription.from_string(`${fontDesc.get_family() || 'Cantarell'} ${Math.round(24 * scale)}px`);
                     const dateLayout = PangoCairo.create_layout(cr);
                     dateLayout.set_font_description(dateDesc);
                     dateLayout.set_text(dateText, -1);
@@ -786,6 +813,10 @@ const ClockWidget = GObject.registerClass(
                 GLib.source_remove(this._tickerId);
                 this._tickerId = null;
             }
+            if (this._positionIdleId) {
+                GLib.source_remove(this._positionIdleId);
+                this._positionIdleId = null;
+            }
             if (this._scrollTimerId) {
                 GLib.source_remove(this._scrollTimerId);
                 this._scrollTimerId = null;
@@ -794,6 +825,8 @@ const ClockWidget = GObject.registerClass(
                 this._settings.disconnect(this._settingsId);
                 this._settingsId = null;
             }
+            this._cachedFontDesc = null;
+            this._cachedDateDesc = null;
             this._contourArea = null;
             this._digitMetrics = null;
             super.destroy();
@@ -813,6 +846,7 @@ export default class DepthClockExtension extends Extension {
         this._cutoutArea = null;
         this._overlayArea = null;
         this._cutoutSurface = null;
+        this._cachedCutoutPattern = null;
         this._contourProfile = null;
         this._activeSubprocess = null;
         this._lastProcessedHash = null;
@@ -1142,18 +1176,20 @@ export default class DepthClockExtension extends Extension {
         this._clockWidget.paintTimeLayout(cr, contrastColor, invertStyle);
         const textPattern = cr.popGroup();
 
-        cr.pushGroup();
-        cr.save();
-        cr.translate(offsetX, offsetY);
-        cr.scale(scale, scale);
-        cr.setSourceSurface(this._cutoutSurface, 0, 0);
-        cr.paint();
-        cr.restore();
-        const cutoutPattern = cr.popGroup();
+        if (!this._cachedCutoutPattern) {
+            cr.pushGroup();
+            cr.save();
+            cr.translate(offsetX, offsetY);
+            cr.scale(scale, scale);
+            cr.setSourceSurface(this._cutoutSurface, 0, 0);
+            cr.paint();
+            cr.restore();
+            this._cachedCutoutPattern = cr.popGroup();
+        }
 
         cr.save();
         cr.setSource(textPattern);
-        cr.mask(cutoutPattern);
+        cr.mask(this._cachedCutoutPattern);
         cr.restore();
     }
 
@@ -1197,14 +1233,14 @@ export default class DepthClockExtension extends Extension {
             const y = ratio * area.height;
 
             if (ratio < 0.95 && y >= minY && y <= maxY) {
-                currSeg.push({ x, y });
+                currSeg.push(x, y);
             } else {
-                if (currSeg.length > 1)
+                if (currSeg.length >= 4)
                     segments.push(currSeg);
                 currSeg = [];
             }
         }
-        if (currSeg.length > 1)
+        if (currSeg.length >= 4)
             segments.push(currSeg);
 
         if (segments.length === 0) return;
@@ -1213,32 +1249,26 @@ export default class DepthClockExtension extends Extension {
         cr.setLineCap(cairo.LineCap.ROUND);
         cr.setLineJoin(cairo.LineJoin.ROUND);
 
-        const buildPath = () => {
-            cr.newPath();
-            for (const seg of segments) {
-                cr.moveTo(seg[0].x, seg[0].y);
-                for (let i = 1; i < seg.length; i++) {
-                    cr.lineTo(seg[i].x, seg[i].y);
-                }
+        cr.newPath();
+        for (const seg of segments) {
+            cr.moveTo(seg[0], seg[1]);
+            for (let i = 2; i < seg.length; i += 2) {
+                cr.lineTo(seg[i], seg[i + 1]);
             }
-        };
+        }
 
-        buildPath();
         cr.setLineWidth(effectiveRadius * 2.2);
         cr.setSourceRGBA(gr, gg, gb, glowIntensity * 0.15);
-        cr.stroke();
+        cr.strokePreserve();
 
-        buildPath();
         cr.setLineWidth(effectiveRadius * 1.1);
         cr.setSourceRGBA(gr, gg, gb, glowIntensity * 0.35);
-        cr.stroke();
+        cr.strokePreserve();
 
-        buildPath();
         cr.setLineWidth(Math.max(2, Math.round(effectiveRadius * 0.35)));
         cr.setSourceRGBA(gr, gg, gb, glowIntensity * 0.75);
-        cr.stroke();
+        cr.strokePreserve();
 
-        buildPath();
         cr.setLineWidth(Math.max(1.5, 1.5 * effectiveScale));
         cr.setSourceRGBA(1.0, 1.0, 1.0, glowIntensity * 0.95);
         cr.stroke();
@@ -1331,6 +1361,8 @@ export default class DepthClockExtension extends Extension {
     _relayout() {
         const monitor = this._getPrimaryMonitor();
         if (!monitor || !this._container) return;
+
+        this._cachedCutoutPattern = null;
 
         this._container.set_position(monitor.x, monitor.y);
         this._container.set_size(monitor.width, monitor.height);
@@ -1469,6 +1501,7 @@ export default class DepthClockExtension extends Extension {
 
         const cacheDir = GLib.build_filenamev([GLib.get_user_cache_dir(), 'depth-clock']);
         GLib.mkdir_with_parents(cacheDir, 0o755);
+        this._pruneCache(cacheDir, 8);
         const cacheFile = GLib.build_filenamev([cacheDir, `${checksum}.png`]);
 
         if (GLib.file_test(cacheFile, GLib.FileTest.EXISTS)) {
@@ -1480,6 +1513,7 @@ export default class DepthClockExtension extends Extension {
                 } catch (e) {}
                 this._cutoutSurface = null;
             }
+            this._cachedCutoutPattern = null;
             this._updateAreaVisibilities();
             this._generateCutoutAsync(wallpaperPath, cacheFile, cropRatio);
         }
@@ -1492,6 +1526,7 @@ export default class DepthClockExtension extends Extension {
             } catch (e) {}
             this._cutoutSurface = null;
         }
+        this._cachedCutoutPattern = null;
 
         try {
             this._cutoutSurface = cairo.ImageSurface.createFromPNG(cutoutPath);
@@ -1712,6 +1747,39 @@ export default class DepthClockExtension extends Extension {
         }
     }
 
+    _pruneCache(cacheDir, maxEntries = 8) {
+        try {
+            const dir = Gio.File.new_for_path(cacheDir);
+            if (!dir.query_exists(null)) return;
+
+            const enumerator = dir.enumerate_children(
+                'standard::name,time::modified',
+                Gio.FileQueryInfoFlags.NONE,
+                null
+            );
+            const files = [];
+            let info;
+            while ((info = enumerator.next_file(null)) !== null) {
+                const name = info.get_name();
+                const mtime = info.get_attribute_uint64('time::modified');
+                files.push({ name, mtime });
+            }
+
+            const maxFiles = maxEntries * 2;
+            if (files.length <= maxFiles) return;
+
+            files.sort((a, b) => b.mtime - a.mtime);
+            for (let i = maxFiles; i < files.length; i++) {
+                const child = dir.get_child(files[i].name);
+                try {
+                    child.delete(null);
+                } catch (e) {}
+            }
+        } catch (e) {
+            console.warn(`[DepthClock] Failed to prune cache: ${e}`);
+        }
+    }
+
     _generateCutoutAsync(wallpaperPath, outputPng, cropRatio) {
         const pythonBin = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'depth-clock', 'venv', 'bin', 'python3']);
         const modelPath = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'share', 'depth-clock', 'models', 'rmbg-1.4.onnx']);
@@ -1759,6 +1827,9 @@ export default class DepthClockExtension extends Extension {
                     }
                 } catch (err) {
                     console.error(`[DepthClock] Subprocess error: ${err}`);
+                } finally {
+                    if (this._activeSubprocess === proc)
+                        this._activeSubprocess = null;
                 }
             });
         } catch (e) {
@@ -1767,6 +1838,7 @@ export default class DepthClockExtension extends Extension {
     }
 
     disable() {
+        this._cachedCutoutPattern = null;
         if (this._wallpaperTimerId) {
             GLib.source_remove(this._wallpaperTimerId);
             this._wallpaperTimerId = null;

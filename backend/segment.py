@@ -109,13 +109,25 @@ def process_wallpaper(input_path, output_png, crop_box=None, crop_ratio=None):
     mask_img = Image.fromarray(mask_u8, mode='L')
     mask_full = mask_img.resize((target_w, target_h), Image.Resampling.BILINEAR)
     
+    # Pre-compute suggested color before discarding orig_img
+    suggested_color = compute_adaptive_clock_color(orig_img)
+
     # Create RGBA cutout
     cutout = orig_img.copy()
     cutout.putalpha(mask_full)
     
     out_path = Path(output_png)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    cutout.save(str(out_path), format='PNG')
+    cutout.save(str(out_path), format='PNG', compress_level=1)
+    
+    # Free heavy pixel buffers immediately
+    del cutout
+    del orig_img
+    del mask_full
+    del mask_img
+    del resized_img
+    del img_data
+    del outputs
     
     # Analyze mask directly on 1024x1024 neural net output
     # Avoids expensive 4K median filtering and full-resolution array allocation
@@ -141,7 +153,7 @@ def process_wallpaper(input_path, output_png, crop_box=None, crop_ratio=None):
         "foreground_ratio": round(total_foreground, 3),
         "clock_zone_occlusion": round(clock_occlusion, 3),
         "depth_viable": clock_occlusion < 0.85 and total_foreground > 0.05,
-        "suggested_color": compute_adaptive_clock_color(orig_img),
+        "suggested_color": suggested_color,
         "contour_samples": contour_samples,
         "render_time": round(time.time() - start_time, 2)
     }
