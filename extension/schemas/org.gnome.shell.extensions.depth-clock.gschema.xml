@@ -69,5 +69,29 @@
       <default>'stretch'</default>
       <summary>Contour adaptation style: stretch or fit</summary>
     </key>
+    <key name="invert-style" type="s">
+      <default>'contrast'</default>
+      <summary>Silhouette inversion style: contrast, outline, or accent</summary>
+    </key>
+    <key name="parallax-intensity" type="i">
+      <default>12</default>
+      <summary>Intensity of mouse interactive depth parallax displacement in pixels</summary>
+    </key>
+    <key name="glow-radius" type="i">
+      <default>14</default>
+      <summary>Radius of illuminated rim glow around subject contour</summary>
+    </key>
+    <key name="glow-color" type="s">
+      <default>'#ffffff'</default>
+      <summary>Color of backlit silhouette rim glow</summary>
+    </key>
+    <key name="glow-intensity" type="d">
+      <default>0.8</default>
+      <summary>Intensity/opacity multiplier for backlit rim glow</summary>
+    </key>
+    <key name="flow-clearance" type="i">
+      <default>10</default>
+      <summary>Clearance margin between flowing digits and subject contour</summary>
+    </key>
   </schema>
 </schemalist>
