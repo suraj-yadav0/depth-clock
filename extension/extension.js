@@ -312,9 +312,8 @@ const ClockWidget = GObject.registerClass(
                 const gap = Math.round(14 * scale);
                 const midGap = Math.round(32 * scale);
                 const totalW = 4 * colW + 2 * gap + midGap;
-                const padY = Math.round(baseDigitH * 0.75);
-                const maxStretch = 2.4;
-                const totalH = Math.round(baseDigitH * (maxStretch + 0.9));
+                const padY = Math.round(baseDigitH * 1.0);
+                const totalH = Math.round(baseDigitH * 3.65);
 
                 this._digitMetrics = {
                     colW,
@@ -348,8 +347,18 @@ const ClockWidget = GObject.registerClass(
             const padY = (this._digitMetrics && this._isContourMode()) ? this._digitMetrics.padY : 0;
             const clockW = (this._isContourMode() && this._digitMetrics) ? this._digitMetrics.totalW : this.width;
 
-            const targetX = Math.round(bounds.width * rx - clockW / 2);
-            const targetY = Math.round(bounds.height * ry - (baseH / 2 + padY));
+            let targetX = Math.round(bounds.width * rx - clockW / 2);
+            let targetY = Math.round(bounds.height * ry - (baseH / 2 + padY));
+
+            if (bounds.width >= clockW) {
+                targetX = Math.max(0, Math.min(bounds.width - clockW, targetX));
+            } else {
+                targetX = Math.round((bounds.width - clockW) / 2);
+            }
+
+            const minY = -padY;
+            const maxY = Math.max(-padY, bounds.height - (baseH + padY));
+            targetY = Math.max(minY, Math.min(maxY, targetY));
 
             this.set_position(targetX, targetY);
             if (this._contourArea && this._contourArea.visible)
@@ -368,13 +377,15 @@ const ClockWidget = GObject.registerClass(
             const centerX = this.x + clockW / 2;
             const centerY = this.y + baseH / 2 + padY;
 
-            const rx = Math.max(-0.2, Math.min(1.2, centerX / bounds.width));
-            const ry = Math.max(-0.2, Math.min(1.2, centerY / bounds.height));
+            const rx = Math.max(0.05, Math.min(0.95, centerX / bounds.width));
+            const ry = Math.max(0.05, Math.min(0.95, centerY / bounds.height));
 
             this._isSavingPosition = true;
             this._settings.set_double('clock-x', Math.round(rx * 1000) / 1000);
             this._settings.set_double('clock-y', Math.round(ry * 1000) / 1000);
             this._isSavingPosition = false;
+
+            this._applyPosition();
         }
 
         _getContourScale(screenX, digitW, baseDigitH, anchorY, bounds) {
@@ -480,7 +491,7 @@ const ClockWidget = GObject.registerClass(
             const targetBottomY = minContourRatio * bounds.height - clearance;
             const defaultBottomY = anchorY + baseDigitH;
             const rawOffset = targetBottomY - defaultBottomY;
-            const maxDisplacement = baseDigitH * 1.2;
+            const maxDisplacement = Math.round(baseDigitH * 0.85);
             const offsetY = Math.max(-maxDisplacement, Math.min(maxDisplacement, rawOffset));
 
             return { sx: 1.0, sy: 1.0, offsetY, tanAngle };
@@ -1087,11 +1098,18 @@ export default class DepthClockExtension extends Extension {
         this._clockWidget.paintTimeLayout(cr, contrastColor, invertStyle);
         const textPattern = cr.popGroup();
 
+        cr.pushGroup();
         cr.save();
-        cr.setSource(textPattern);
         cr.translate(offsetX, offsetY);
         cr.scale(scale, scale);
-        cr.maskSurface(this._cutoutSurface, 0, 0);
+        cr.setSourceSurface(this._cutoutSurface, 0, 0);
+        cr.paint();
+        cr.restore();
+        const cutoutPattern = cr.popGroup();
+
+        cr.save();
+        cr.setSource(textPattern);
+        cr.mask(cutoutPattern);
         cr.restore();
     }
 
@@ -1101,13 +1119,16 @@ export default class DepthClockExtension extends Extension {
         if (contour.length === 0) return;
 
         const [rangeLeft, rangeRight] = this._clockWidget.getHorizontalRange();
-        const pad = 40;
+        const scale = this._clockWidget ? (this._clockWidget._currentScale ?? this._settings.get_double('clock-scale')) : 1.0;
+        const effectiveScale = Math.max(0.7, scale);
+        const pad = Math.round(40 * effectiveScale);
         const startX = Math.max(0, rangeLeft - pad);
         const endX = Math.min(area.width, rangeRight + pad);
         if (endX <= startX) return;
 
         const glowRadius = this._settings.get_int('glow-radius');
         const glowIntensity = this._settings.get_double('glow-intensity');
+        const effectiveRadius = glowRadius * effectiveScale;
         let glowColorHex = this._settings.get_string('glow-color') || '#ffffff';
         if (glowColorHex === '#ffffff') {
             const clockColor = this._settings.get_string('clock-color');
@@ -1117,12 +1138,13 @@ export default class DepthClockExtension extends Extension {
 
         const clockY = this._clockWidget.y;
         const clockH = this._clockWidget.height > 0 ? this._clockWidget.height : this._clockWidget._getBaseClockHeight();
-        const minY = Math.max(0, clockY - 120);
-        const maxY = Math.min(area.height, clockY + clockH + 120);
+        const padGlow = Math.round(120 * effectiveScale);
+        const minY = Math.max(0, clockY - padGlow);
+        const maxY = Math.min(area.height, clockY + clockH + padGlow);
 
         const segments = [];
         let currSeg = [];
-        const step = 3;
+        const step = Math.max(2, Math.round(3 * effectiveScale));
 
         for (let x = startX; x <= endX; x += step) {
             const normX = Math.max(0, Math.min(1, x / area.width));
@@ -1158,22 +1180,22 @@ export default class DepthClockExtension extends Extension {
         };
 
         buildPath();
-        cr.setLineWidth(glowRadius * 2.2);
+        cr.setLineWidth(effectiveRadius * 2.2);
         cr.setSourceRGBA(gr, gg, gb, glowIntensity * 0.15);
         cr.stroke();
 
         buildPath();
-        cr.setLineWidth(glowRadius * 1.1);
+        cr.setLineWidth(effectiveRadius * 1.1);
         cr.setSourceRGBA(gr, gg, gb, glowIntensity * 0.35);
         cr.stroke();
 
         buildPath();
-        cr.setLineWidth(Math.max(2, Math.round(glowRadius * 0.35)));
+        cr.setLineWidth(Math.max(2, Math.round(effectiveRadius * 0.35)));
         cr.setSourceRGBA(gr, gg, gb, glowIntensity * 0.75);
         cr.stroke();
 
         buildPath();
-        cr.setLineWidth(1.5);
+        cr.setLineWidth(Math.max(1.5, 1.5 * effectiveScale));
         cr.setSourceRGBA(1.0, 1.0, 1.0, glowIntensity * 0.95);
         cr.stroke();
 
@@ -1265,8 +1287,10 @@ export default class DepthClockExtension extends Extension {
         if (this._overlayArea)
             this._overlayArea.set_size(monitor.width, monitor.height);
 
-        if (this._clockWidget)
+        if (this._clockWidget) {
+            this._clockWidget._applyStyles();
             this._clockWidget._applyPosition();
+        }
     }
 
     _getWallpaperPath() {
@@ -1464,7 +1488,7 @@ export default class DepthClockExtension extends Extension {
 
     _extractContourFromCutout(pngPath) {
         try {
-            const pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(pngPath, 256, 144, false);
+            const pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(pngPath, 256, 256, false);
             if (!pb) return null;
             const w = pb.get_width();
             const h = pb.get_height();
