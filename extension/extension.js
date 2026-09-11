@@ -54,6 +54,7 @@ const ClockWidget = GObject.registerClass(
             this._currentScale = null;
             this._digitMetrics = null;
             this._lastTimeString = '';
+            this._lastDateString = '';
 
             // Date label
             this._dateLabel = new St.Label({
@@ -130,7 +131,8 @@ const ClockWidget = GObject.registerClass(
                     );
                     if (this._contourArea && this._contourArea.visible)
                         this._contourArea.queue_repaint();
-                    if (this._onRepaintOverlay)
+                    const mode = this._settings.get_string('clock-mode');
+                    if (this._onRepaintOverlay && (mode === 'silhouette-invert' || mode === 'rim-glow'))
                         this._onRepaintOverlay();
                     return Clutter.EVENT_STOP;
                 }
@@ -218,9 +220,12 @@ const ClockWidget = GObject.registerClass(
                     this._currentScale = this._settings.get_double('clock-scale');
                     this._applyStyles();
                     this._applyPosition();
-                    if (this._onRepaintOverlay)
+                    const mode = this._settings.get_string('clock-mode');
+                    if (this._onRepaintOverlay && (mode === 'silhouette-invert' || mode === 'rim-glow'))
                         this._onRepaintOverlay();
-                } else if (key === 'time-format-24h' || key === 'show-date') {
+                } else if (key === 'time-format-24h' || key === 'show-date' || key === 'stack-digits') {
+                    this._lastTimeString = '';
+                    this._lastDateString = '';
                     this._updateClock();
                 }
             });
@@ -628,14 +633,12 @@ const ClockWidget = GObject.registerClass(
             const isStacked = this._settings.get_boolean('stack-digits');
             const mode = this._settings.get_string('clock-mode');
 
+            let dateStr = '';
             if (showDate) {
                 const dayStr = DAYS[now.get_day_of_week() % 7];
                 const monthStr = MONTHS[now.get_month() - 1];
                 const dayNum = now.get_day_of_month();
-                this._dateLabel.set_text(`${dayNum} ${monthStr} ${dayStr}`);
-                this._dateLabel.show();
-            } else {
-                this._dateLabel.hide();
+                dateStr = `${dayNum} ${monthStr} ${dayStr}`;
             }
 
             let hour = now.get_hour();
@@ -647,18 +650,29 @@ const ClockWidget = GObject.registerClass(
             const mm = min < 10 ? `0${min}` : `${min}`;
             const timeStr = `${hh}:${mm}`;
 
+            if (timeStr === this._lastTimeString && dateStr === this._lastDateString)
+                return;
+
+            this._lastTimeString = timeStr;
+            this._lastDateString = dateStr;
+
+            if (showDate) {
+                this._dateLabel.set_text(dateStr);
+                this._dateLabel.show();
+            } else {
+                this._dateLabel.hide();
+            }
+
             if (mode === 'contour-stretch' || mode === 'contour-flow') {
-                if (timeStr !== this._lastTimeString) {
-                    this._lastTimeString = timeStr;
-                    if (this._contourArea && this._contourArea.visible)
-                        this._contourArea.queue_repaint();
-                }
+                if (this._contourArea && this._contourArea.visible)
+                    this._contourArea.queue_repaint();
             } else {
                 if (isStacked)
                     this._timeLabel.set_text(`${hh}\n${mm}`);
                 else
                     this._timeLabel.set_text(`${hh}${mm}`);
-                if (this._onRepaintOverlay)
+                const needsOverlay = mode === 'silhouette-invert' || mode === 'rim-glow';
+                if (this._onRepaintOverlay && needsOverlay)
                     this._onRepaintOverlay();
             }
         }
@@ -751,6 +765,7 @@ const ClockWidget = GObject.registerClass(
 
         updateMode() {
             this._lastTimeString = '';
+            this._lastDateString = '';
             this._applyStyles();
             this._applyPosition();
             this._updateClock();
@@ -806,6 +821,10 @@ export default class DepthClockExtension extends Extension {
         this._layoutIdleId = null;
         this._stageMotionId = null;
         this._parallaxIdleId = null;
+        this._lastParallaxX = 0;
+        this._lastParallaxY = 0;
+        this._pendingPointerX = 0;
+        this._pendingPointerY = 0;
 
         this._setupActors();
 
@@ -815,26 +834,19 @@ export default class DepthClockExtension extends Extension {
         this._interfaceChangeId = this._interfaceSettings.connect('changed::color-scheme', () => this._scheduleWallpaperUpdate());
 
         this._settingsDepthId = this._settings.connect('changed::enable-depth', () => {
-            if (this._cutoutArea)
-                this._cutoutArea.queue_repaint();
+            this._updateAreaVisibilities();
         });
 
         this._settingsContourId = this._settings.connect('changed::contour-mode', () => {
             if (this._clockWidget)
                 this._clockWidget.updateMode();
-            if (this._cutoutArea)
-                this._cutoutArea.queue_repaint();
+            this._updateAreaVisibilities();
         });
 
         this._settingsModeId = this._settings.connect('changed::clock-mode', () => {
             if (this._clockWidget)
                 this._clockWidget.updateMode();
-            if (this._glowArea)
-                this._glowArea.queue_repaint();
-            if (this._cutoutArea)
-                this._cutoutArea.queue_repaint();
-            if (this._overlayArea)
-                this._overlayArea.queue_repaint();
+            this._updateAreaVisibilities();
             this._updateParallaxState();
         });
 
@@ -854,7 +866,7 @@ export default class DepthClockExtension extends Extension {
         });
 
         this._settingsInvertStyleId = this._settings.connect('changed::invert-style', () => {
-            if (this._overlayArea)
+            if (this._overlayArea && this._overlayArea.visible)
                 this._overlayArea.queue_repaint();
         });
 
@@ -863,17 +875,17 @@ export default class DepthClockExtension extends Extension {
         });
 
         this._settingsGlowColorId = this._settings.connect('changed::glow-color', () => {
-            if (this._glowArea)
+            if (this._glowArea && this._glowArea.visible)
                 this._glowArea.queue_repaint();
         });
 
         this._settingsGlowRadiusId = this._settings.connect('changed::glow-radius', () => {
-            if (this._glowArea)
+            if (this._glowArea && this._glowArea.visible)
                 this._glowArea.queue_repaint();
         });
 
         this._settingsGlowIntensityId = this._settings.connect('changed::glow-intensity', () => {
-            if (this._glowArea)
+            if (this._glowArea && this._glowArea.visible)
                 this._glowArea.queue_repaint();
         });
 
@@ -888,8 +900,7 @@ export default class DepthClockExtension extends Extension {
         });
 
         this._settingsAutoAdaptId = this._settings.connect('changed::auto-adapt', () => {
-            if (this._cutoutArea)
-                this._cutoutArea.queue_repaint();
+            this._updateAreaVisibilities();
         });
 
         this._monitorsId = Main.layoutManager.connect('monitors-changed', () => {
@@ -929,12 +940,40 @@ export default class DepthClockExtension extends Extension {
     }
 
     _shouldRenderCutout() {
+        if (!this._settings.get_boolean('enable-depth'))
+            return false;
         const mode = this._settings.get_string('clock-mode');
         if (mode === 'flat' || mode === 'contour-stretch' || mode === 'contour-flow')
             return false;
         const autoAdapt = this._settings.get_boolean('auto-adapt');
         const depthViable = autoAdapt && this._depthViable !== undefined ? this._depthViable : true;
         return depthViable;
+    }
+
+    _updateAreaVisibilities() {
+        const mode = this._settings ? this._settings.get_string('clock-mode') : 'depth';
+        const hasCutout = !!this._cutoutSurface;
+        const hasContour = !!(this._contourProfile && this._contourProfile.length > 0);
+
+        const showCutout = this._shouldRenderCutout() && hasCutout;
+        const showGlow = (mode === 'rim-glow') && hasContour;
+        const showOverlay = (mode === 'silhouette-invert') && hasCutout;
+
+        if (this._cutoutArea) {
+            this._cutoutArea.visible = showCutout;
+            if (showCutout)
+                this._cutoutArea.queue_repaint();
+        }
+        if (this._glowArea) {
+            this._glowArea.visible = showGlow;
+            if (showGlow)
+                this._glowArea.queue_repaint();
+        }
+        if (this._overlayArea) {
+            this._overlayArea.visible = showOverlay;
+            if (showOverlay)
+                this._overlayArea.queue_repaint();
+        }
     }
 
     _setupActors() {
@@ -968,6 +1007,7 @@ export default class DepthClockExtension extends Extension {
         this._glowArea = new St.DrawingArea({
             reactive: false,
             can_focus: false,
+            visible: false,
         });
         this._glowArea.set_position(0, 0);
         this._glowArea.set_size(monitor.width, monitor.height);
@@ -989,6 +1029,7 @@ export default class DepthClockExtension extends Extension {
         this._cutoutArea = new St.DrawingArea({
             reactive: false,
             can_focus: false,
+            visible: false,
         });
         this._cutoutArea.set_position(0, 0);
         this._cutoutArea.set_size(monitor.width, monitor.height);
@@ -1024,11 +1065,14 @@ export default class DepthClockExtension extends Extension {
         this._overlayArea = new St.DrawingArea({
             reactive: false,
             can_focus: false,
+            visible: false,
         });
         this._overlayArea.set_position(0, 0);
         this._overlayArea.set_size(monitor.width, monitor.height);
         this._overlayArea.connect('repaint', (area) => this._paintOverlay(area));
         this._container.add_child(this._overlayArea);
+
+        this._updateAreaVisibilities();
 
         // Insert into background group
         this._bgGroup = Main.layoutManager._backgroundGroup;
@@ -1216,29 +1260,35 @@ export default class DepthClockExtension extends Extension {
         if (this._stageMotionId) return;
         this._stageMotionId = global.stage.connect('captured-event', (_stage, event) => {
             if (event.type() === Clutter.EventType.MOTION) {
-                this._queueParallaxUpdate();
+                const [stageX, stageY] = event.get_coords();
+                this._queueParallaxUpdate(stageX, stageY);
             }
             return Clutter.EVENT_PROPAGATE;
         });
     }
 
-    _queueParallaxUpdate() {
+    _queueParallaxUpdate(stageX, stageY) {
+        this._pendingPointerX = stageX;
+        this._pendingPointerY = stageY;
         if (this._parallaxIdleId) return;
         this._parallaxIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
             this._parallaxIdleId = null;
-            this._applyParallax();
+            this._applyParallax(this._pendingPointerX, this._pendingPointerY);
             return GLib.SOURCE_REMOVE;
         });
     }
 
-    _applyParallax() {
+    _applyParallax(px, py) {
         const mode = this._settings ? this._settings.get_string('clock-mode') : null;
         if (mode !== 'depth-parallax') return;
 
         const monitor = this._getPrimaryMonitor();
         if (!monitor || !this._clockWidget || this._clockWidget._isDragging) return;
 
-        const [px, py] = global.get_pointer();
+        if (px === undefined || py === undefined) {
+            [px, py] = global.get_pointer();
+        }
+
         const cx = monitor.x + monitor.width / 2;
         const cy = monitor.y + monitor.height / 2;
 
@@ -1249,9 +1299,12 @@ export default class DepthClockExtension extends Extension {
         const tx = Math.round(normX * intensity);
         const ty = Math.round(normY * intensity * 0.6);
 
+        if (tx === this._lastParallaxX && ty === this._lastParallaxY)
+            return;
+
+        this._lastParallaxX = tx;
+        this._lastParallaxY = ty;
         this._clockWidget.set_translation(tx, ty, 0);
-        if (this._cutoutArea)
-            this._cutoutArea.set_translation(0, 0, 0);
     }
 
     _disableParallax() {
@@ -1263,6 +1316,8 @@ export default class DepthClockExtension extends Extension {
             GLib.source_remove(this._parallaxIdleId);
             this._parallaxIdleId = null;
         }
+        this._lastParallaxX = 0;
+        this._lastParallaxY = 0;
         if (this._clockWidget)
             this._clockWidget.set_translation(0, 0, 0);
         if (this._cutoutArea)
@@ -1419,26 +1474,27 @@ export default class DepthClockExtension extends Extension {
         if (GLib.file_test(cacheFile, GLib.FileTest.EXISTS)) {
             this._loadCutout(cacheFile);
         } else {
-            this._cutoutSurface = null;
-            if (this._cutoutArea)
-                this._cutoutArea.queue_repaint();
-            if (this._glowArea)
-                this._glowArea.queue_repaint();
-            if (this._overlayArea)
-                this._overlayArea.queue_repaint();
+            if (this._cutoutSurface) {
+                try {
+                    this._cutoutSurface.finish();
+                } catch (e) {}
+                this._cutoutSurface = null;
+            }
+            this._updateAreaVisibilities();
             this._generateCutoutAsync(wallpaperPath, cacheFile, cropRatio);
         }
     }
 
     _loadCutout(cutoutPath) {
+        if (this._cutoutSurface) {
+            try {
+                this._cutoutSurface.finish();
+            } catch (e) {}
+            this._cutoutSurface = null;
+        }
+
         try {
             this._cutoutSurface = cairo.ImageSurface.createFromPNG(cutoutPath);
-            if (this._cutoutArea)
-                this._cutoutArea.queue_repaint();
-            if (this._glowArea)
-                this._glowArea.queue_repaint();
-            if (this._overlayArea)
-                this._overlayArea.queue_repaint();
         } catch (e) {
             console.error(`[DepthClock] Failed to load cutout surface: ${e}`);
             this._cutoutSurface = null;
@@ -1457,12 +1513,6 @@ export default class DepthClockExtension extends Extension {
                     }
                     if (this._settings.get_boolean('auto-adapt') && meta.depth_viable !== undefined) {
                         this._depthViable = meta.depth_viable;
-                        if (this._cutoutArea)
-                            this._cutoutArea.queue_repaint();
-                        if (this._glowArea)
-                            this._glowArea.queue_repaint();
-                        if (this._overlayArea)
-                            this._overlayArea.queue_repaint();
                     }
                     if (Array.isArray(meta.contour_samples) && meta.contour_samples.length > 0) {
                         this._contourProfile = meta.contour_samples;
@@ -1480,10 +1530,8 @@ export default class DepthClockExtension extends Extension {
 
         if (this._clockWidget)
             this._clockWidget.updateContourData(this._contourProfile);
-        if (this._glowArea)
-            this._glowArea.queue_repaint();
-        if (this._overlayArea)
-            this._overlayArea.queue_repaint();
+
+        this._updateAreaVisibilities();
     }
 
     _extractContourFromCutout(pngPath) {
@@ -1785,7 +1833,12 @@ export default class DepthClockExtension extends Extension {
             this._container = null;
         }
 
-        this._cutoutSurface = null;
+        if (this._cutoutSurface) {
+            try {
+                this._cutoutSurface.finish();
+            } catch (e) {}
+            this._cutoutSurface = null;
+        }
         this._contourProfile = null;
         this._bgGroup = null;
         this._settings = null;

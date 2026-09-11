@@ -1,4 +1,5 @@
 import sys
+import os
 import time
 from pathlib import Path
 import numpy as np
@@ -10,7 +11,8 @@ def run_segmentation(input_path, output_path, model_path):
     
     session_options = ort.SessionOptions()
     session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    session_options.intra_op_num_threads = 8
+    session_options.intra_op_num_threads = min(4, os.cpu_count() or 2)
+    session_options.inter_op_num_threads = 1
     
     session = ort.InferenceSession(str(model_path), session_options, providers=['CPUExecutionProvider'])
     input_name = session.get_inputs()[0].name

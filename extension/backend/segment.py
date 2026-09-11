@@ -7,7 +7,7 @@ import urllib.parse
 from pathlib import Path
 import colorsys
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
 import onnxruntime as ort
 
 MODEL_PATH = Path.home() / '.local/share/depth-clock/models/rmbg-1.4.onnx'
@@ -80,7 +80,8 @@ def process_wallpaper(input_path, output_png, crop_box=None, crop_ratio=None):
     
     session_options = ort.SessionOptions()
     session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    session_options.intra_op_num_threads = min(8, os.cpu_count() or 4)
+    session_options.intra_op_num_threads = min(4, os.cpu_count() or 2)
+    session_options.inter_op_num_threads = 1
     
     session = ort.InferenceSession(str(MODEL_PATH), session_options, providers=['CPUExecutionProvider'])
     input_name = session.get_inputs()[0].name
@@ -116,20 +117,18 @@ def process_wallpaper(input_path, output_png, crop_box=None, crop_ratio=None):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     cutout.save(str(out_path), format='PNG')
     
-    # Analyze mask for clock occlusion (clock is roughly top 10% to 50%)
-    mask_arr = np.array(mask_full)
-    clock_zone = mask_arr[int(target_h * 0.1):int(target_h * 0.5), :]
+    # Analyze mask directly on 1024x1024 neural net output
+    # Avoids expensive 4K median filtering and full-resolution array allocation
+    clock_zone = mask_u8[int(1024 * 0.1):int(1024 * 0.5), :]
     clock_occlusion = float(np.mean(clock_zone > 128))
-    total_foreground = float(np.mean(mask_arr > 128))
+    total_foreground = float(np.mean(mask_u8 > 128))
     
-    clean_for_contour = mask_full.filter(ImageFilter.MedianFilter(size=5))
-    contour_mask_arr = np.array(clean_for_contour)
-    is_fg = contour_mask_arr > 128
+    is_fg = mask_u8 > 128
     has_fg = np.any(is_fg, axis=0)
-    first_fg_y = np.where(has_fg, np.argmax(is_fg, axis=0), target_h)
+    first_fg_y = np.where(has_fg, np.argmax(is_fg, axis=0), 1024)
 
-    sample_indices = np.linspace(0, target_w - 1, 256, dtype=int)
-    raw_samples = [float(first_fg_y[idx]) / target_h for idx in sample_indices]
+    sample_indices = np.linspace(0, 1024 - 1, 256, dtype=int)
+    raw_samples = [float(first_fg_y[idx]) / 1024.0 for idx in sample_indices]
 
     kernel = np.array([0.05, 0.2, 0.5, 0.2, 0.05])
     padded = np.pad(raw_samples, (2, 2), mode='edge')

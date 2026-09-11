@@ -19,34 +19,61 @@ For the best 3D depth effect, use wallpapers with:
 A curated collection of wallpapers tested and optimized for Depth Clock is available at:
 - [depth-clock-wallpapers](https://github.com/suraj-yadav0/depth-clock-wallpapers)
 
+## Clock Interaction Modes
+
+Depth Clock includes seven distinct interaction modes:
+
+| Mode | Identifier | Description |
+| :--- | :--- | :--- |
+| **3D Depth Effect** | `depth` | Classic spatial depth. Segments foreground subjects and places digits tucked naturally behind them. |
+| **Silhouette Flow** | `contour-flow` | Digits perch along the elevation curve of the subject silhouette, matching local slopes and flowing across contours. |
+| **Contour-Adaptive** | `contour-stretch` | Digits dynamically scale and stretch downwards to meet the subject contour, with options for vertical stretch or proportional fit. |
+| **Silhouette Inversion** | `silhouette-invert` | Digits span across subject boundaries. Intersecting regions inside the foreground silhouette invert dynamically (high-contrast, stencil outline, or vivid accent). |
+| **Interactive Parallax** | `depth-parallax` | Mouse motion triggers multi-plane 3D spatial displacement between the background wallpaper, clock layer, and foreground subject. |
+| **Backlit Rim Glow** | `rim-glow` | Digits sit behind the subject, casting an illuminated neon edge aura along the silhouette perimeter where digits intersect foreground contours. |
+| **Standard Flat Clock** | `flat` | Clean 2D clock display without subject occlusion or geometry deformation. |
+
+## Mode Customization Options
+
+- **Dual-Tone Hour/Minute Accents**: Tint hour digits with the dominant wallpaper accent and minute digits with a clean complementary tone.
+- **Contour Style**: Choose between flexible vertical stretch (`stretch`) or proportional scale (`fit`).
+- **Contour & Flow Clearance**: Adjust the vertical gap in pixels between the clock baseline and subject silhouette.
+- **Invert Style**: Select how digits render over the silhouette (`contrast` for dark/light inversion, `outline` for stencil contour lines, or `accent` for color-shift pop).
+- **Parallax Intensity**: Configure spatial displacement sensitivity (1 to 50 pixels).
+- **Glow Radius & Intensity**: Fine-tune rim aura thickness and luminosity.
+- **Custom Rim Glow Color**: Select an independent aura color or link directly to the primary clock color.
+
+## Performance and Resource Efficiency
+
+Depth Clock is engineered to run with minimal CPU and GPU overhead:
+
+- **Zero Idle Redraws**: Time evaluation is minute-aligned. When the minute and date have not changed, time updates return immediately without scene graph renegotiation or Cairo redraws.
+- **Scene Graph Actor Pruning**: Full-screen DrawingAreas (`_cutoutArea`, `_glowArea`, `_overlayArea`) are hidden (`visible = false`) when not required by the active mode. Hidden actors are skipped completely by Clutter, eliminating redundant transparent GPU compositing passes on every desktop frame.
+- **Native Memory Lifecycle Management**: Backing Cairo image surfaces are explicitly finalized (`cairo_surface_finish`) upon wallpaper transitions, preventing native unmanaged RAM retention.
+- **Direct 1024x1024 Mask Analysis**: Contour extraction and occlusion metrics sample directly from the 1024x1024 neural network tensor in NumPy, avoiding heavy 4K median filtering and multi-megabyte array allocations.
+- **Thread-Bounded Inference**: ONNX Runtime CPU execution is constrained to 4 threads with single inter-op concurrency, preventing UI stutter or desktop thread starvation during background segmentation.
+- **Event-Driven Parallax**: Motion tracking extracts coordinates directly from Clutter stage events, skipping redundant IPC queries and suppressing transform passes when integer pixel coordinates have not changed.
+
 ## Features
 
-- Multiple Subject Interaction Modes:
-  - 3D Depth Effect (Behind Subject): Segments foreground subjects and places clock digits tucked naturally behind them.
-  - Contour-Adaptive Mode (Over Subject): Clock digits dynamically adapt to the foreground subject contour, rendered directly over the subject with dual-tone styling (wallpaper accent for hours, clean contrasting tone for minutes), customizable clearance padding, and both vertical stretch and proportional fit options.
-  - Silhouette Inversion (Negative Space): Digits pass across the subject boundary. Text outside the subject displays in your chosen clock color, while intersecting segments inside the silhouette dynamically render in contrasting tone, stencil outline, or vivid accent color.
-  - Interactive Depth Parallax: Mouse movement across your desktop triggers subtle, multi-plane 3D spatial shifts between the background wallpaper, clock layer, and foreground subject.
-  - Backlit Aura (Silhouette Rim Glow): Clock digits sit behind the subject, casting an illuminated edge halo and neon rim along the contour of the foreground subject where the digits intersect it.
-  - Silhouette Flow (Contour Baseline): Clock digits follow the elevation and baseline curve of the subject contour, perching and flowing naturally along the silhouette.
-  - Standard Flat Clock: Pure 2D clock display without subject occlusion or deformation.
-- Automatic Foreground Occlusion: Segments people, pets, architecture, and objects using on-device neural networks.
-- Adaptive Wallpaper Color:
+- **Automatic Foreground Occlusion**: Segments people, pets, architecture, and objects using on-device neural networks.
+- **Adaptive Wallpaper Color**:
   - Automatically samples wallpaper luminance in the clock region (upper 12% to 50%).
   - Extracts dominant, vibrant color accents in HLS color space and calculates contrast-optimized clock text colors.
   - Automatically adapts between high-luminance tints on dark backgrounds and deep, readable tones on light backgrounds.
   - Live updates when switching wallpapers, GNOME dark/light modes, or display layouts.
   - Preference switch with live color badge and manual override via native GTK4 color selector dialog.
-- In-Preferences AI Setup: Check AI model readiness and download/reinstall model weights directly within GNOME extension settings.
-- Direct Desktop Controls: Click and drag the clock anywhere on your desktop to reposition. Scroll over the clock to resize dynamically.
-- Customization:
+- **In-Preferences AI Setup**: Check AI model readiness and download/reinstall model weights directly within GNOME extension settings.
+- **Direct Desktop Controls**: Click and drag the clock anywhere on your desktop to reposition. Scroll over the clock to resize dynamically.
+- **Customization**:
   - Native Font & Color Selectors: Choose installed system fonts (weights, styles) and custom colors using GTK4 modal dialogs.
   - 12-hour or 24-hour time format.
   - Optional date indicator.
   - Stacked digits layout (hours on top, minutes below) or classic horizontal layout.
   - Automatic legibility safeguard (disables occlusion if the subject covers more than 85% of the digits).
-- 100% Local and Private: All segmentation runs locally using CPU-optimized ONNX Runtime. No images ever leave your computer.
-- Multi-Monitor Support: Handles primary display positioning, monitor aspect-fill scaling, and spanned wallpaper geometry.
-- Modern GNOME Support: Compatible with GNOME Shell 45, 46, 47, 48, 49, and 50+.
+- **100% Local and Private**: All segmentation runs locally using CPU-optimized ONNX Runtime. No images ever leave your computer.
+- **Multi-Monitor and Orientation Support**: Handles primary display positioning, monitor aspect-fill scaling, spanned wallpaper geometry, and automatic re-segmentation on display rotation.
+- **Modern GNOME Support**: Compatible with GNOME Shell 45, 46, 47, 48, 49, and 50+.
 
 ## How It Works
 
@@ -163,6 +190,33 @@ Open extension settings:
 gnome-extensions prefs depth-clock@suraj-yadav0.github.io
 ```
 
+## Settings Reference
+
+| Key | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `clock-mode` | `s` | `'depth'` | Active mode: `'depth'`, `'contour-flow'`, `'contour-stretch'`, `'silhouette-invert'`, `'depth-parallax'`, `'rim-glow'`, `'flat'`. |
+| `enable-depth` | `b` | `true` | Master switch for foreground segmentation. |
+| `clock-x` | `d` | `0.5` | Normalized horizontal position (0.0 to 1.0). |
+| `clock-y` | `d` | `0.3` | Normalized vertical position (0.0 to 1.0). |
+| `clock-scale` | `d` | `1.0` | Clock scaling factor (0.3 to 3.5). |
+| `clock-font` | `s` | `'Antonio Bold 250'` | Clock typography font family and weight. |
+| `clock-color` | `s` | `'#ffffff'` | Clock text color in hex format. |
+| `clock-opacity` | `d` | `1.0` | Opacity from 0.1 to 1.0. |
+| `time-format-24h` | `b` | `true` | 24-hour vs 12-hour format. |
+| `stack-digits` | `b` | `false` | Stack hours above minutes. |
+| `show-date` | `b` | `true` | Show date indicator below clock. |
+| `auto-color` | `b` | `false` | Adaptive wallpaper palette extraction. |
+| `auto-adapt` | `b` | `true` | Safeguard disabling depth on heavy occlusion (>85%). |
+| `dual-tone` | `b` | `true` | Dual-tone hour/minute styling in contour modes. |
+| `contour-clearance` | `i` | `12` | Vertical baseline padding for contour stretch. |
+| `contour-style` | `s` | `'stretch'` | Contour mode scaling: `'stretch'` or `'fit'`. |
+| `flow-clearance` | `i` | `8` | Baseline clearance for silhouette flow. |
+| `invert-style` | `s` | `'contrast'` | Inversion style: `'contrast'`, `'outline'`, `'accent'`. |
+| `parallax-intensity`| `i` | `18` | Spatial shift intensity in pixels (1 to 50). |
+| `glow-radius` | `i` | `16` | Rim glow aura stroke radius (4 to 48). |
+| `glow-intensity` | `d` | `0.85` | Rim glow opacity and brightness (0.1 to 1.0). |
+| `glow-color` | `s` | `'#ffffff'` | Rim glow stroke color in hex format. |
+
 ## Repository Structure
 
 ```
@@ -174,6 +228,7 @@ depth-clock/
 │   ├── segment.py            # Wallpaper segmentation worker
 │   └── test_segment.py       # Standalone test script for image segmentation
 ├── extension/
+│   ├── backend/              # Bundled segmentation worker
 │   ├── extension.js          # Core GNOME Shell extension logic and actors
 │   ├── metadata.json         # Extension metadata and supported GNOME versions
 │   ├── prefs.js              # Preferences window (libadwaita)
