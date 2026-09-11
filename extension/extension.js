@@ -31,7 +31,7 @@ function hexToRgba(hex, alpha = 1.0) {
 
 const ClockWidget = GObject.registerClass(
     class ClockWidget extends St.BoxLayout {
-        _init(settings, getMonitorBounds, getContourData) {
+        _init(settings, getMonitorBounds, getContourData, onRepaintOverlay = null) {
             super._init({
                 vertical: true,
                 reactive: true,
@@ -42,6 +42,7 @@ const ClockWidget = GObject.registerClass(
             this._settings = settings;
             this._getMonitorBounds = getMonitorBounds;
             this._getContourData = getContourData;
+            this._onRepaintOverlay = onRepaintOverlay;
             this._isDragging = false;
             this._isSavingPosition = false;
             this._grab = null;
@@ -127,6 +128,8 @@ const ClockWidget = GObject.registerClass(
                     );
                     if (this._contourArea && this._contourArea.visible)
                         this._contourArea.queue_repaint();
+                    if (this._onRepaintOverlay)
+                        this._onRepaintOverlay();
                     return Clutter.EVENT_STOP;
                 }
                 return Clutter.EVENT_PROPAGATE;
@@ -203,11 +206,18 @@ const ClockWidget = GObject.registerClass(
                     key === 'contour-mode' ||
                     key === 'dual-tone' ||
                     key === 'contour-clearance' ||
-                    key === 'contour-style'
+                    key === 'contour-style' ||
+                    key === 'invert-style' ||
+                    key === 'glow-radius' ||
+                    key === 'glow-color' ||
+                    key === 'glow-intensity' ||
+                    key === 'flow-clearance'
                 ) {
                     this._currentScale = this._settings.get_double('clock-scale');
                     this._applyStyles();
                     this._applyPosition();
+                    if (this._onRepaintOverlay)
+                        this._onRepaintOverlay();
                 } else if (key === 'time-format-24h' || key === 'show-date') {
                     this._updateClock();
                 }
@@ -226,7 +236,7 @@ const ClockWidget = GObject.registerClass(
 
         _isContourMode() {
             const mode = this._settings.get_string('clock-mode');
-            return this._settings.get_boolean('contour-mode') || mode === 'contour-stretch';
+            return this._settings.get_boolean('contour-mode') || mode === 'contour-stretch' || mode === 'contour-flow';
         }
 
         _getBaseClockHeight() {
@@ -334,6 +344,8 @@ const ClockWidget = GObject.registerClass(
             this.set_position(targetX, targetY);
             if (this._contourArea && this._contourArea.visible)
                 this._contourArea.queue_repaint();
+            if (this._onRepaintOverlay)
+                this._onRepaintOverlay();
         }
 
         _savePosition() {
@@ -407,6 +419,43 @@ const ClockWidget = GObject.registerClass(
             return { sx: 1.0, sy, offsetY: 0 };
         }
 
+        _getFlowOffset(screenX, digitW, baseDigitH, anchorY, bounds) {
+            if (!bounds || bounds.width === 0 || bounds.height === 0)
+                return { sx: 1.0, sy: 1.0, offsetY: 0 };
+
+            const contour = this._getContourData ? this._getContourData() : null;
+            if (!contour || contour.length === 0)
+                return { sx: 1.0, sy: 1.0, offsetY: 0 };
+
+            const hasAnyObject = contour.some(v => v < 0.95);
+            if (!hasAnyObject)
+                return { sx: 1.0, sy: 1.0, offsetY: 0 };
+
+            const nSamples = contour.length;
+            let minContourRatio = 1.0;
+            const steps = 6;
+            for (let s = 0; s <= steps; s++) {
+                const px = screenX + (s / steps) * digitW;
+                const normX = Math.max(0, Math.min(1, px / bounds.width));
+                const idx = Math.min(nSamples - 1, Math.floor(normX * nSamples));
+                const val = contour[idx];
+                if (val < minContourRatio)
+                    minContourRatio = val;
+            }
+
+            if (minContourRatio >= 0.96)
+                return { sx: 1.0, sy: 1.0, offsetY: 0 };
+
+            const clearance = this._settings.get_int('flow-clearance');
+            const targetBottomY = minContourRatio * bounds.height - clearance;
+            const defaultBottomY = anchorY + baseDigitH;
+            const rawOffset = targetBottomY - defaultBottomY;
+            const maxDisplacement = baseDigitH * 1.5;
+            const offsetY = Math.max(-maxDisplacement, Math.min(maxDisplacement, rawOffset));
+
+            return { sx: 1.0, sy: 1.0, offsetY };
+        }
+
         _paintContourClock(area) {
             if (!this._digitMetrics) return;
 
@@ -460,6 +509,7 @@ const ClockWidget = GObject.registerClass(
             const layout = PangoCairo.create_layout(cr);
             layout.set_font_description(fontDesc);
 
+            const isFlow = this._settings.get_string('clock-mode') === 'contour-flow';
             let currX = 0;
             const topY = 0;
 
@@ -470,7 +520,9 @@ const ClockWidget = GObject.registerClass(
                 const digitScreenX = anchorX + currX + xOffset;
                 const digitLocalX = currX + xOffset;
 
-                const { sx, sy, offsetY } = this._getContourScale(digitScreenX, w, baseDigitH, anchorY, bounds);
+                const { sx, sy, offsetY } = isFlow
+                    ? this._getFlowOffset(digitScreenX, w, baseDigitH, anchorY, bounds)
+                    : this._getContourScale(digitScreenX, w, baseDigitH, anchorY, bounds);
                 const col = i < 2 ? hourColor : minuteColor;
 
                 // Ambient soft drop shadow for depth separation over subject
@@ -530,7 +582,7 @@ const ClockWidget = GObject.registerClass(
             const mm = min < 10 ? `0${min}` : `${min}`;
             const timeStr = `${hh}:${mm}`;
 
-            if (mode === 'contour-stretch') {
+            if (mode === 'contour-stretch' || mode === 'contour-flow') {
                 if (timeStr !== this._lastTimeString) {
                     this._lastTimeString = timeStr;
                     if (this._contourArea && this._contourArea.visible)
@@ -541,7 +593,61 @@ const ClockWidget = GObject.registerClass(
                     this._timeLabel.set_text(`${hh}\n${mm}`);
                 else
                     this._timeLabel.set_text(`${hh}${mm}`);
+                if (this._onRepaintOverlay)
+                    this._onRepaintOverlay();
             }
+        }
+
+        paintTimeLayout(cr, colorRgba, style = 'contrast') {
+            const text = this._timeLabel.get_text();
+            if (!text) return;
+
+            const isStacked = this._settings.get_boolean('stack-digits');
+            const font = this._settings.get_string('clock-font');
+            const scale = this._currentScale ?? this._settings.get_double('clock-scale');
+            const baseFontSize = isStacked ? 190 : 250;
+            const fontSize = Math.round(baseFontSize * scale);
+
+            const fontDesc = Pango.FontDescription.from_string(font);
+            fontDesc.set_size(fontSize * Pango.SCALE);
+            if (!fontDesc.get_weight() || fontDesc.get_weight() === Pango.Weight.NORMAL)
+                fontDesc.set_weight(Pango.Weight.BOLD);
+
+            const layout = PangoCairo.create_layout(cr);
+            layout.set_font_description(fontDesc);
+            layout.set_text(text, -1);
+            layout.set_alignment(isStacked ? Pango.Alignment.CENTER : Pango.Alignment.LEFT);
+
+            const [labelX, labelY] = this._timeLabel.get_transformed_position();
+            const bounds = this._getMonitorBounds();
+            const monX = bounds?.x ?? 0;
+            const monY = bounds?.y ?? 0;
+            const drawX = labelX - monX;
+            const drawY = labelY - monY;
+
+            cr.save();
+            cr.translate(drawX, drawY);
+
+            if (style === 'outline') {
+                cr.setLineWidth(Math.max(2, Math.round(3.5 * scale)));
+                cr.setSourceRGBA(colorRgba[0], colorRgba[1], colorRgba[2], colorRgba[3] ?? 1.0);
+                PangoCairo.layout_path(cr, layout);
+                cr.stroke();
+            } else {
+                cr.setSourceRGBA(colorRgba[0], colorRgba[1], colorRgba[2], colorRgba[3] ?? 1.0);
+                PangoCairo.show_layout(cr, layout);
+            }
+
+            cr.restore();
+        }
+
+        getHorizontalRange() {
+            const bounds = this._getMonitorBounds();
+            const monX = bounds?.x ?? 0;
+            const [actorX] = this.get_transformed_position();
+            const startX = Math.max(0, actorX - monX);
+            const endX = Math.min(bounds?.width ?? 1920, startX + this.width);
+            return [startX, endX];
         }
 
         updateMode() {
@@ -556,6 +662,7 @@ const ClockWidget = GObject.registerClass(
         }
 
         destroy() {
+            this._onRepaintOverlay = null;
             if (this._grab) {
                 this._grab.dismiss();
                 this._grab = null;
@@ -588,6 +695,7 @@ export default class DepthClockExtension extends Extension {
         this._container = null;
         this._clockWidget = null;
         this._cutoutArea = null;
+        this._overlayArea = null;
         this._cutoutSurface = null;
         this._contourProfile = null;
         this._activeSubprocess = null;
@@ -595,6 +703,8 @@ export default class DepthClockExtension extends Extension {
         this._requestToken = 0;
         this._wallpaperTimerId = null;
         this._layoutIdleId = null;
+        this._stageMotionId = null;
+        this._parallaxIdleId = null;
 
         this._setupActors();
 
@@ -620,6 +730,9 @@ export default class DepthClockExtension extends Extension {
                 this._clockWidget.updateMode();
             if (this._cutoutArea)
                 this._cutoutArea.queue_repaint();
+            if (this._overlayArea)
+                this._overlayArea.queue_repaint();
+            this._updateParallaxState();
         });
 
         this._settingsDualToneId = this._settings.connect('changed::dual-tone', () => {
@@ -633,6 +746,30 @@ export default class DepthClockExtension extends Extension {
         });
 
         this._settingsContourStyleId = this._settings.connect('changed::contour-style', () => {
+            if (this._clockWidget)
+                this._clockWidget.updateContourData();
+        });
+
+        this._settingsInvertStyleId = this._settings.connect('changed::invert-style', () => {
+            if (this._overlayArea)
+                this._overlayArea.queue_repaint();
+        });
+
+        this._settingsParallaxIntensityId = this._settings.connect('changed::parallax-intensity', () => {
+            this._applyParallax();
+        });
+
+        this._settingsGlowRadiusId = this._settings.connect('changed::glow-radius', () => {
+            if (this._overlayArea)
+                this._overlayArea.queue_repaint();
+        });
+
+        this._settingsGlowIntensityId = this._settings.connect('changed::glow-intensity', () => {
+            if (this._overlayArea)
+                this._overlayArea.queue_repaint();
+        });
+
+        this._settingsFlowClearanceId = this._settings.connect('changed::flow-clearance', () => {
             if (this._clockWidget)
                 this._clockWidget.updateContourData();
         });
@@ -651,6 +788,8 @@ export default class DepthClockExtension extends Extension {
             this._relayout();
             this._scheduleWallpaperUpdate();
         });
+
+        this._updateParallaxState();
 
         // Trigger initial wallpaper processing
         this._onWallpaperChanged();
@@ -673,7 +812,18 @@ export default class DepthClockExtension extends Extension {
     }
 
     _isContourMode() {
-        return this._settings.get_boolean('contour-mode') || this._settings.get_string('clock-mode') === 'contour-stretch';
+        const mode = this._settings.get_string('clock-mode');
+        return this._settings.get_boolean('contour-mode') || mode === 'contour-stretch' || mode === 'contour-flow';
+    }
+
+    _shouldRenderCutout() {
+        const mode = this._settings.get_string('clock-mode');
+        if (mode === 'flat' || mode === 'contour-stretch' || mode === 'contour-flow')
+            return false;
+        const depthEnabled = this._settings.get_boolean('enable-depth');
+        const autoAdapt = this._settings.get_boolean('auto-adapt');
+        const depthViable = autoAdapt && this._depthViable !== undefined ? this._depthViable : true;
+        return depthEnabled && depthViable;
     }
 
     _setupActors() {
@@ -693,7 +843,11 @@ export default class DepthClockExtension extends Extension {
                 const m = this._getPrimaryMonitor();
                 return m ? { x: m.x, y: m.y, width: m.width, height: m.height } : null;
             },
-            () => this._contourProfile
+            () => this._contourProfile,
+            () => {
+                if (this._overlayArea)
+                    this._overlayArea.queue_repaint();
+            }
         );
         this._container.add_child(this._clockWidget);
 
@@ -710,13 +864,7 @@ export default class DepthClockExtension extends Extension {
             cr.setOperator(cairo.Operator.CLEAR);
             cr.paint();
 
-            const isContour = this._isContourMode();
-            const depthEnabled = this._settings.get_boolean('enable-depth');
-            const autoAdapt = this._settings.get_boolean('auto-adapt');
-            const depthViable = autoAdapt && this._depthViable !== undefined ? this._depthViable : true;
-
-            // Only occlude clock text in 3D Depth mode (when contour mode is disabled)
-            if (!isContour && depthEnabled && depthViable && this._cutoutSurface) {
+            if (this._shouldRenderCutout() && this._cutoutSurface) {
                 cr.setOperator(cairo.Operator.OVER);
                 const sw = this._cutoutSurface.getWidth();
                 const sh = this._cutoutSurface.getHeight();
@@ -737,6 +885,16 @@ export default class DepthClockExtension extends Extension {
         });
 
         this._container.add_child(this._cutoutArea);
+
+        // Child 2: Overlay Area (for silhouette inversion and rim glow)
+        this._overlayArea = new St.DrawingArea({
+            reactive: false,
+            can_focus: false,
+        });
+        this._overlayArea.set_position(0, 0);
+        this._overlayArea.set_size(monitor.width, monitor.height);
+        this._overlayArea.connect('repaint', (area) => this._paintOverlay(area));
+        this._container.add_child(this._overlayArea);
 
         // Insert into background group
         this._bgGroup = Main.layoutManager._backgroundGroup;
@@ -761,6 +919,184 @@ export default class DepthClockExtension extends Extension {
         });
     }
 
+    _paintOverlay(area) {
+        const cr = area.get_context();
+        cr.setOperator(cairo.Operator.CLEAR);
+        cr.paint();
+        cr.setOperator(cairo.Operator.OVER);
+
+        const mode = this._settings.get_string('clock-mode');
+        if (mode === 'silhouette-invert') {
+            this._paintSilhouetteInvert(cr, area);
+        } else if (mode === 'rim-glow') {
+            this._paintRimGlow(cr, area);
+        }
+
+        cr.$dispose();
+    }
+
+    _paintSilhouetteInvert(cr, area) {
+        if (!this._cutoutSurface || !this._clockWidget) return;
+
+        const invertStyle = this._settings.get_string('invert-style') || 'contrast';
+        const clockColorHex = this._settings.get_string('clock-color') || '#ffffff';
+        const baseColor = hexToRgba(clockColorHex);
+        const [r, g, b] = [baseColor[0], baseColor[1], baseColor[2]];
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+        let contrastColor;
+        if (invertStyle === 'accent') {
+            contrastColor = lum > 0.6 ? [0.95, 0.45, 0.20, 1.0] : [0.20, 0.85, 0.95, 1.0];
+        } else if (invertStyle === 'outline') {
+            contrastColor = lum > 0.5 ? [0.98, 0.98, 0.99, 0.95] : [0.12, 0.14, 0.18, 0.95];
+        } else {
+            // High contrast solid tone
+            contrastColor = lum > 0.55 ? [0.10, 0.12, 0.16, 0.96] : [0.98, 0.98, 1.0, 0.96];
+        }
+
+        const sw = this._cutoutSurface.getWidth();
+        const sh = this._cutoutSurface.getHeight();
+        if (sw === 0 || sh === 0) return;
+
+        const scaleX = area.width / sw;
+        const scaleY = area.height / sh;
+        const scale = Math.max(scaleX, scaleY);
+        const offsetX = (area.width - sw * scale) / 2;
+        const offsetY = (area.height - sh * scale) / 2;
+
+        cr.pushGroup();
+        this._clockWidget.paintTimeLayout(cr, contrastColor, invertStyle);
+        const textPattern = cr.popGroup();
+
+        cr.save();
+        cr.setSource(textPattern);
+        cr.translate(offsetX, offsetY);
+        cr.scale(scale, scale);
+        cr.maskSurface(this._cutoutSurface, 0, 0);
+        cr.restore();
+    }
+
+    _paintRimGlow(cr, area) {
+        if (!this._contourProfile || !this._clockWidget) return;
+        const contour = this._contourProfile;
+        if (contour.length === 0) return;
+
+        const [rangeLeft, rangeRight] = this._clockWidget.getHorizontalRange();
+        const pad = 40;
+        const startX = Math.max(0, rangeLeft - pad);
+        const endX = Math.min(area.width, rangeRight + pad);
+        if (endX <= startX) return;
+
+        const glowRadius = this._settings.get_int('glow-radius');
+        const glowIntensity = this._settings.get_double('glow-intensity');
+        const glowColorHex = this._settings.get_string('glow-color') || '#ffffff';
+        const [gr, gg, gb] = hexToRgba(glowColorHex);
+
+        cr.save();
+        cr.setLineCap(cairo.LineCap.ROUND);
+        cr.setLineJoin(cairo.LineJoin.ROUND);
+
+        const step = 4;
+        let first = true;
+        for (let x = startX; x <= endX; x += step) {
+            const normX = Math.max(0, Math.min(1, x / area.width));
+            const idx = Math.min(contour.length - 1, Math.floor(normX * contour.length));
+            const y = contour[idx] * area.height;
+            if (first) {
+                cr.moveTo(x, y);
+                first = false;
+            } else {
+                cr.lineTo(x, y);
+            }
+        }
+
+        // Multi-tier luminance bloom
+        cr.setLineWidth(glowRadius * 2.2);
+        cr.setSourceRGBA(gr, gg, gb, glowIntensity * 0.15);
+        cr.strokePreserve();
+
+        cr.setLineWidth(glowRadius * 1.1);
+        cr.setSourceRGBA(gr, gg, gb, glowIntensity * 0.35);
+        cr.strokePreserve();
+
+        cr.setLineWidth(Math.max(2, Math.round(glowRadius * 0.35)));
+        cr.setSourceRGBA(gr, gg, gb, glowIntensity * 0.75);
+        cr.strokePreserve();
+
+        cr.setLineWidth(1.5);
+        cr.setSourceRGBA(1.0, 1.0, 1.0, glowIntensity * 0.95);
+        cr.stroke();
+
+        cr.restore();
+    }
+
+    _updateParallaxState() {
+        const mode = this._settings.get_string('clock-mode');
+        const isParallax = mode === 'depth-parallax';
+        if (isParallax && !this._stageMotionId) {
+            this._enableParallax();
+        } else if (!isParallax && this._stageMotionId) {
+            this._disableParallax();
+        }
+    }
+
+    _enableParallax() {
+        if (this._stageMotionId) return;
+        this._stageMotionId = global.stage.connect('captured-event', (_stage, event) => {
+            if (event.type() === Clutter.EventType.MOTION) {
+                this._queueParallaxUpdate();
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+    }
+
+    _queueParallaxUpdate() {
+        if (this._parallaxIdleId) return;
+        this._parallaxIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._parallaxIdleId = null;
+            this._applyParallax();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _applyParallax() {
+        const mode = this._settings ? this._settings.get_string('clock-mode') : null;
+        if (mode !== 'depth-parallax') return;
+
+        const monitor = this._getPrimaryMonitor();
+        if (!monitor || !this._clockWidget) return;
+
+        const [px, py] = global.get_pointer();
+        const cx = monitor.x + monitor.width / 2;
+        const cy = monitor.y + monitor.height / 2;
+
+        const normX = Math.max(-1, Math.min(1, (px - cx) / (monitor.width / 2)));
+        const normY = Math.max(-1, Math.min(1, (py - cy) / (monitor.height / 2)));
+
+        const intensity = this._settings.get_int('parallax-intensity');
+        const tx = Math.round(normX * intensity);
+        const ty = Math.round(normY * intensity);
+
+        this._clockWidget.set_translation(tx, ty, 0);
+        if (this._cutoutArea)
+            this._cutoutArea.set_translation(-Math.round(tx * 0.4), -Math.round(ty * 0.4), 0);
+    }
+
+    _disableParallax() {
+        if (this._stageMotionId) {
+            global.stage.disconnect(this._stageMotionId);
+            this._stageMotionId = null;
+        }
+        if (this._parallaxIdleId) {
+            GLib.source_remove(this._parallaxIdleId);
+            this._parallaxIdleId = null;
+        }
+        if (this._clockWidget)
+            this._clockWidget.set_translation(0, 0, 0);
+        if (this._cutoutArea)
+            this._cutoutArea.set_translation(0, 0, 0);
+    }
+
     _relayout() {
         const monitor = this._getPrimaryMonitor();
         if (!monitor || !this._container) return;
@@ -770,6 +1106,8 @@ export default class DepthClockExtension extends Extension {
 
         if (this._cutoutArea)
             this._cutoutArea.set_size(monitor.width, monitor.height);
+        if (this._overlayArea)
+            this._overlayArea.set_size(monitor.width, monitor.height);
 
         if (this._clockWidget)
             this._clockWidget._applyPosition();
@@ -904,6 +1242,8 @@ export default class DepthClockExtension extends Extension {
             this._cutoutSurface = null;
             if (this._cutoutArea)
                 this._cutoutArea.queue_repaint();
+            if (this._overlayArea)
+                this._overlayArea.queue_repaint();
             this._generateCutoutAsync(wallpaperPath, cacheFile, cropRatio);
         }
     }
@@ -913,6 +1253,8 @@ export default class DepthClockExtension extends Extension {
             this._cutoutSurface = cairo.ImageSurface.createFromPNG(cutoutPath);
             if (this._cutoutArea)
                 this._cutoutArea.queue_repaint();
+            if (this._overlayArea)
+                this._overlayArea.queue_repaint();
         } catch (e) {
             console.error(`[DepthClock] Failed to load cutout surface: ${e}`);
             this._cutoutSurface = null;
@@ -933,6 +1275,8 @@ export default class DepthClockExtension extends Extension {
                         this._depthViable = meta.depth_viable;
                         if (this._cutoutArea)
                             this._cutoutArea.queue_repaint();
+                        if (this._overlayArea)
+                            this._overlayArea.queue_repaint();
                     }
                     if (Array.isArray(meta.contour_samples) && meta.contour_samples.length > 0) {
                         this._contourProfile = meta.contour_samples;
@@ -950,6 +1294,8 @@ export default class DepthClockExtension extends Extension {
 
         if (this._clockWidget)
             this._clockWidget.updateContourData(this._contourProfile);
+        if (this._overlayArea)
+            this._overlayArea.queue_repaint();
     }
 
     _extractContourFromCutout(pngPath) {
@@ -1203,9 +1549,16 @@ export default class DepthClockExtension extends Extension {
         if (this._settingsDualToneId) this._settings.disconnect(this._settingsDualToneId);
         if (this._settingsContourClearanceId) this._settings.disconnect(this._settingsContourClearanceId);
         if (this._settingsContourStyleId) this._settings.disconnect(this._settingsContourStyleId);
+        if (this._settingsInvertStyleId) this._settings.disconnect(this._settingsInvertStyleId);
+        if (this._settingsParallaxIntensityId) this._settings.disconnect(this._settingsParallaxIntensityId);
+        if (this._settingsGlowRadiusId) this._settings.disconnect(this._settingsGlowRadiusId);
+        if (this._settingsGlowIntensityId) this._settings.disconnect(this._settingsGlowIntensityId);
+        if (this._settingsFlowClearanceId) this._settings.disconnect(this._settingsFlowClearanceId);
         if (this._settingsAutoColorId) this._settings.disconnect(this._settingsAutoColorId);
         if (this._settingsAutoAdaptId) this._settings.disconnect(this._settingsAutoAdaptId);
         if (this._monitorsId) Main.layoutManager.disconnect(this._monitorsId);
+
+        this._disableParallax();
 
         if (this._activeSubprocess) {
             try {
@@ -1222,6 +1575,11 @@ export default class DepthClockExtension extends Extension {
         if (this._cutoutArea) {
             this._cutoutArea.destroy();
             this._cutoutArea = null;
+        }
+
+        if (this._overlayArea) {
+            this._overlayArea.destroy();
+            this._overlayArea = null;
         }
 
         if (this._container) {
