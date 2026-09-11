@@ -229,15 +229,20 @@ depth-clock/
 │   └── test_segment.py       # Standalone test script for image segmentation
 ├── extension/
 │   ├── backend/              # Bundled segmentation worker
-│   ├── extension.js          # Core GNOME Shell extension logic and actors
+│   ├── clockWidget.js        # Clock widget actor, layout, and contour deformation
+│   ├── colorUtils.js         # Color conversions and wallpaper color extraction
+│   ├── extension.js          # Core GNOME Shell extension lifecycle and overlay rendering
 │   ├── metadata.json         # Extension metadata and supported GNOME versions
 │   ├── prefs.js              # Preferences window (libadwaita)
+│   ├── setup-backend.sh      # Extension backend verification and setup utility
 │   ├── stylesheet.css        # Clock widget styles
+│   ├── wallpaperManager.js   # Wallpaper detection, crop calculations, and cutout cache
 │   └── schemas/
 │       └── org.gnome.shell.extensions.depth-clock.gschema.xml
 ├── fonts/
 │   └── Antonio-Bold.ttf      # Default recommended clock font
 ├── install.sh                # Automated setup and installer
+├── package.sh                # Extension packaging script
 ├── uninstall.sh              # Clean removal script
 ├── .gitignore
 ├── LICENSE                   # GNU General Public License v3.0

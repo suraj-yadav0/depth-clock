@@ -145,8 +145,7 @@ fi
 # Install GNOME Shell Extension
 echo "--> Installing GNOME extension files..."
 mkdir -p "$EXTENSION_DIR/schemas"
-cp "$SOURCE_DIR/extension/extension.js" "$EXTENSION_DIR/"
-cp "$SOURCE_DIR/extension/prefs.js" "$EXTENSION_DIR/"
+cp "$SOURCE_DIR/extension/"*.js "$EXTENSION_DIR/"
 cp "$SOURCE_DIR/extension/metadata.json" "$EXTENSION_DIR/"
 cp "$SOURCE_DIR/extension/stylesheet.css" "$EXTENSION_DIR/"
 cp "$SOURCE_DIR/extension/schemas/"*.gschema.xml "$EXTENSION_DIR/schemas/"
