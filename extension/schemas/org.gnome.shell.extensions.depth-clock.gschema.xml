@@ -51,7 +51,7 @@
     </key>
     <key name="clock-mode" type="s">
       <default>'depth'</default>
-      <summary>Clock interaction mode: depth, contour-stretch, or flat</summary>
+      <summary>Clock interaction mode: depth, contour-stretch, day-display, or flat</summary>
     </key>
     <key name="contour-mode" type="b">
       <default>false</default>

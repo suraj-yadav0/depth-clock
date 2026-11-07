@@ -9,6 +9,11 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { hexToRgba } from './colorUtils.js';
 
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const FULL_DAYS = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const FULL_MONTHS = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+
 export const ClockWidget = GObject.registerClass(
     class ClockWidget extends St.BoxLayout {
         _init(settings, getMonitorBounds, getContourData, onRepaintOverlay = null) {
@@ -36,8 +41,20 @@ export const ClockWidget = GObject.registerClass(
             this._digitMetrics = null;
             this._cachedFontDesc = null;
             this._cachedDateDesc = null;
+            this._cachedDayDesc = null;
             this._lastTimeString = '';
             this._lastDateString = '';
+            this._lastDayString = '';
+
+            // Day name label (day-display mode: large "FRIDAY" style)
+            this._dayLabel = new St.Label({
+                text: '',
+                style_class: 'depth-clock-day',
+                x_align: Clutter.ActorAlign.CENTER,
+            });
+            this._dayLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+            this._dayLabel.hide();
+            this.add_child(this._dayLabel);
 
             // Date label
             this._dateLabel = new St.Label({
@@ -266,8 +283,10 @@ export const ClockWidget = GObject.registerClass(
             const opacity = Math.round(this._settings.get_double('clock-opacity') * 255);
             const isStacked = this._settings.get_boolean('stack-digits');
             const isContour = this._isContourMode();
+            const mode = this._settings.get_string('clock-mode');
+            const isDayDisplay = mode === 'day-display';
 
-            const baseFontSize = (isStacked && !isContour) ? 190 : 250;
+            const baseFontSize = (isStacked && !isContour && !isDayDisplay) ? 190 : 250;
             const fontSize = Math.round(baseFontSize * scale);
             const dateSize = Math.round(24 * scale);
 
@@ -288,63 +307,92 @@ export const ClockWidget = GObject.registerClass(
 
             this._cachedDateDesc = Pango.FontDescription.from_string(`${fontFamily} ${dateSize}px`);
 
-            this._timeLabel.set_style(
-                `font-family: '${fontFamily}', sans-serif; ${weightCss} ${styleCss} font-size: ${fontSize}px; color: ${color}; line-height: ${isStacked ? 0.82 : 0.9};`
-            );
-            this._dateLabel.set_style(
-                `font-size: ${dateSize}px; color: ${color}; opacity: 0.9;`
-            );
-            this.set_opacity(opacity);
+            if (isDayDisplay) {
+                // Day-display mode: large day name, medium date, small time
+                const dayFontSize = Math.round(140 * scale);
+                const dayDateSize = Math.round(22 * scale);
+                const dayTimeSize = Math.round(20 * scale);
+                const spacing = Math.round(12 * scale);
 
-            if (isContour) {
-                this._timeLabel.hide();
-                this._contourArea.show();
+                // Use Orbitron if available, fall back to the configured font
+                const dayFont = 'Orbitron';
+                const dayFontDesc = Pango.FontDescription.from_string(`${dayFont} Bold ${dayFontSize}px`);
+                this._cachedDayDesc = dayFontDesc;
 
-                const tempSurface = new cairo.ImageSurface(cairo.Format.ARGB32, 1, 1);
-                const cr = new cairo.Context(tempSurface);
-                const layoutDesc = fontDesc;
-
-                const layout = PangoCairo.create_layout(cr);
-                layout.set_font_description(layoutDesc);
-
-                let maxDigitW = 0;
-                let baseDigitH = 0;
-                for (let i = 0; i <= 9; i++) {
-                    layout.set_text(i.toString(), -1);
-                    const [w, h] = layout.get_pixel_size();
-                    if (w > maxDigitW) maxDigitW = w;
-                    if (h > baseDigitH) baseDigitH = h;
-                }
-                cr.$dispose();
-                tempSurface.finish();
-
-                const colW = Math.max(maxDigitW, Math.round(fontSize * 0.44));
-                const gap = Math.round(14 * scale);
-                const midGap = Math.round(32 * scale);
-                const totalW = 4 * colW + 2 * gap + midGap;
-                const padY = Math.round(baseDigitH * 1.0);
-                const totalH = Math.round(baseDigitH * 3.65);
-
-                this._digitMetrics = {
-                    colW,
-                    gap,
-                    midGap,
-                    baseDigitH,
-                    padY,
-                    totalW,
-                    totalH,
-                    fontSize,
-                    fontDesc: layoutDesc,
-                };
-
-                this._contourArea.set_size(totalW, totalH);
-                this._contourArea.set_width(totalW);
-                this._contourArea.set_height(totalH);
-                this._contourArea.queue_repaint();
-            } else {
-                this._contourArea.hide();
+                this._dayLabel.set_style(
+                    `font-family: '${dayFont}', '${fontFamily}', sans-serif; font-weight: 700; font-size: ${dayFontSize}px; color: ${color}; letter-spacing: ${spacing}px; line-height: 1.0;`
+                );
+                this._dateLabel.set_style(
+                    `font-family: '${fontFamily}', sans-serif; font-size: ${dayDateSize}px; color: ${color}; opacity: 0.75; letter-spacing: ${Math.round(8 * scale)}px; padding-top: ${Math.round(12 * scale)}px;`
+                );
+                this._timeLabel.set_style(
+                    `font-family: '${fontFamily}', sans-serif; font-size: ${dayTimeSize}px; color: ${color}; opacity: 0.6; letter-spacing: ${Math.round(6 * scale)}px; padding-top: ${Math.round(6 * scale)}px;`
+                );
+                this._dayLabel.show();
                 this._timeLabel.show();
+                this._contourArea.hide();
+            } else {
+                this._dayLabel.hide();
+
+                this._timeLabel.set_style(
+                    `font-family: '${fontFamily}', sans-serif; ${weightCss} ${styleCss} font-size: ${fontSize}px; color: ${color}; line-height: ${isStacked ? 0.82 : 0.9};`
+                );
+                this._dateLabel.set_style(
+                    `font-size: ${dateSize}px; color: ${color}; opacity: 0.9;`
+                );
+
+                if (isContour) {
+                    this._timeLabel.hide();
+                    this._contourArea.show();
+
+                    const tempSurface = new cairo.ImageSurface(cairo.Format.ARGB32, 1, 1);
+                    const cr = new cairo.Context(tempSurface);
+                    const layoutDesc = fontDesc;
+
+                    const layout = PangoCairo.create_layout(cr);
+                    layout.set_font_description(layoutDesc);
+
+                    let maxDigitW = 0;
+                    let baseDigitH = 0;
+                    for (let i = 0; i <= 9; i++) {
+                        layout.set_text(i.toString(), -1);
+                        const [w, h] = layout.get_pixel_size();
+                        if (w > maxDigitW) maxDigitW = w;
+                        if (h > baseDigitH) baseDigitH = h;
+                    }
+                    cr.$dispose();
+                    tempSurface.finish();
+
+                    const colW = Math.max(maxDigitW, Math.round(fontSize * 0.44));
+                    const gap = Math.round(14 * scale);
+                    const midGap = Math.round(32 * scale);
+                    const totalW = 4 * colW + 2 * gap + midGap;
+                    const padY = Math.round(baseDigitH * 1.0);
+                    const totalH = Math.round(baseDigitH * 3.65);
+
+                    this._digitMetrics = {
+                        colW,
+                        gap,
+                        midGap,
+                        baseDigitH,
+                        padY,
+                        totalW,
+                        totalH,
+                        fontSize,
+                        fontDesc: layoutDesc,
+                    };
+
+                    this._contourArea.set_size(totalW, totalH);
+                    this._contourArea.set_width(totalW);
+                    this._contourArea.set_height(totalH);
+                    this._contourArea.queue_repaint();
+                } else {
+                    this._contourArea.hide();
+                    this._timeLabel.show();
+                }
             }
+
+            this.set_opacity(opacity);
         }
 
         _applyPosition() {
@@ -638,6 +686,41 @@ export const ClockWidget = GObject.registerClass(
             const isStacked = this._settings.get_boolean('stack-digits');
             const mode = this._settings.get_string('clock-mode');
 
+            let hour = now.get_hour();
+            const min = now.get_minute();
+            if (!is24h)
+                hour = hour % 12 || 12;
+            const hh = hour < 10 ? `0${hour}` : `${hour}`;
+            const mm = min < 10 ? `0${min}` : `${min}`;
+
+            if (mode === 'day-display') {
+                const dayName = FULL_DAYS[now.get_day_of_week() % 7];
+                const dayNum = now.get_day_of_month();
+                const monthName = FULL_MONTHS[now.get_month() - 1];
+                const year = now.get_year();
+                const dateStr = `${dayNum}  ${monthName},  ${year}`;
+                const amPm = is24h ? '' : (now.get_hour() >= 12 ? ' PM' : ' AM');
+                const timeStr = `${hh}:${mm}${amPm}`;
+
+                if (dayName === this._lastDayString && dateStr === this._lastDateString && timeStr === this._lastTimeString)
+                    return;
+
+                this._lastDayString = dayName;
+                this._lastDateString = dateStr;
+                this._lastTimeString = timeStr;
+
+                this._dayLabel.set_text(dayName);
+                this._dayLabel.show();
+                this._dateLabel.set_text(dateStr);
+                this._dateLabel.show();
+                this._timeLabel.set_text(timeStr);
+                this._timeLabel.show();
+                return;
+            }
+
+            // Non-day-display modes
+            this._lastDayString = '';
+
             let dateStr = '';
             if (showDate) {
                 const dayStr = DAYS[now.get_day_of_week() % 7];
@@ -646,13 +729,6 @@ export const ClockWidget = GObject.registerClass(
                 dateStr = `${dayNum} ${monthStr} ${dayStr}`;
             }
 
-            let hour = now.get_hour();
-            const min = now.get_minute();
-            if (!is24h)
-                hour = hour % 12 || 12;
-
-            const hh = hour < 10 ? `0${hour}` : `${hour}`;
-            const mm = min < 10 ? `0${min}` : `${min}`;
             const timeStr = `${hh}:${mm}`;
 
             if (timeStr === this._lastTimeString && dateStr === this._lastDateString)
@@ -773,6 +849,7 @@ export const ClockWidget = GObject.registerClass(
         updateMode() {
             this._lastTimeString = '';
             this._lastDateString = '';
+            this._lastDayString = '';
             this._applyStyles();
             this._applyPosition();
             this._updateClock();
@@ -807,7 +884,9 @@ export const ClockWidget = GObject.registerClass(
             }
             this._cachedFontDesc = null;
             this._cachedDateDesc = null;
+            this._cachedDayDesc = null;
             this._contourArea = null;
+            this._dayLabel = null;
             this._digitMetrics = null;
             super.destroy();
         }
